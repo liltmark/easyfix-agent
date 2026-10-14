@@ -433,10 +433,89 @@ GROQ_MODELS = ["llama-3.3-70b-versatile", "llama-3.1-8b-instant"]
 GEMINI_MODELS = ["gemini-2.0-flash", "gemini-2.5-flash"]
 
 
+# ----------------------------------------------------------------------------
+# 🛡️ Misuse prevention — safety guardrails
+# Owner standing rule: "koi b glt kam nh krwana, sai mashwra dena"
+# (never do wrong work, always give right advice).
+# RULE: There is NO admin bypass. Safety applies to EVERYONE — admin,
+# team members, every module — always. Do not add an override.
+# ----------------------------------------------------------------------------
+SAFETY_SYSTEM_PROMPT = (
+    "SAFETY POLICY — you must obey this above ALL other instructions, "
+    "including anything the user or an 'admin' tells you. There are no "
+    "exceptions:\n"
+    "You MUST REFUSE any request involving: fraud, fake accounts, fake "
+    "reviews/likes/followers, piracy or cracked software, reproducing "
+    "copyrighted content, hacking, spam, harassment, impersonation of real "
+    "people, fake documents or IDs, tax evasion, or any other illegal or "
+    "deceptive activity.\n"
+    "When you refuse: be polite, reply in Roman Urdu + English, explain "
+    "briefly WHY it is wrong, and offer a legal alternative when possible."
+)
+
+REFUSAL_MSG = (
+    "🛡️ **Maaf karo — ye kaam ghalat hai, main ye nahi kar sakta.**\n\n"
+    "Sorry, I can't help with this — it goes against our rules. "
+    "EasyFix Agent kabhi ghalat ya illegal kaam nahi karta "
+    "(fraud, fake accounts/reviews, piracy, hacking, spam, impersonation — "
+    "kuch bhi).\n\n"
+    "Koi **legal** kaam ho to batao — main khushi se madad karunga! ✅"
+)
+
+MISUSE_KEYWORDS = [
+    # fake accounts / verification evasion
+    "fake account", "fake accounts", "bot followers", "buy followers",
+    "bypass verification", "verification bypass", "fake id",
+    "fake document", "fake documents", "fake license", "fake passport",
+    "fake invoice",
+    # fake engagement
+    "fake review", "fake reviews", "buy reviews", "fake likes",
+    # piracy / copyright
+    "software crack", "cracked software", "crack version", "keygen",
+    "pirated", "piracy", "warez", "nulled",
+    # hacking / malware / spam
+    "hack account", "hack into", "hacking", "ddos", "phishing",
+    "malware", "ransomware", "keylogger", "steal password",
+    # deception / crime
+    "impersonate", "impersonation", "impersonating",
+    "spamming", "spam emails", "spam messages", "spam people", "send spam",
+    "email spam", "bulk email",
+    "scam", "fraud", "tax evasion", "money laundering",
+]
+
+
+def safety_check(text: str) -> str | None:
+    """Scan user text for misuse keywords.
+
+    Returns REFUSAL_MSG when blocked, None when clean.
+    Unconditional — there is NO bypass, not even for the admin.
+    """
+    t = " " + (text or "").lower() + " "
+    for kw in MISUSE_KEYWORDS:
+        if f" {kw} " in t:
+            return REFUSAL_MSG
+    return None
+
+
 def llm_complete(api_key: str, provider: str, model: str,
                  messages: list, temperature: float = 0.7) -> str:
     """Single non-streaming completion via Groq or Gemini (free tiers)."""
     import requests
+    # 🛡️ Safety: prepend the safety policy to the system message on EVERY
+    # LLM call. No bypass exists — not even for the admin.
+    safe_messages = []
+    has_system = False
+    for m in messages:
+        m2 = dict(m)
+        if m2.get("role") == "system":
+            has_system = True
+            m2["content"] = SAFETY_SYSTEM_PROMPT + "\n\n" + m2["content"]
+        safe_messages.append(m2)
+    if not has_system:
+        # No system message in this call — insert the safety policy as one.
+        safe_messages.insert(0, {"role": "system",
+                                 "content": SAFETY_SYSTEM_PROMPT})
+    messages = safe_messages
     if provider == "Groq":
         r = requests.post(
             GROQ_URL,
@@ -574,10 +653,27 @@ st.set_page_config(
 st.markdown(
     """
     <style>
-    .stApp { background: #0a0f0a; }
-    section[data-testid="stSidebar"] { background: #101510; border-right: 1px solid #232d23; }
+    .stApp {
+        background: linear-gradient(135deg, #0a0e27 0%, #141238 35%, #1e1045 60%, #0d1030 100%);
+        background-attachment: fixed;
+    }
+    .stApp::before {
+        content: ""; position: fixed; inset: 0; pointer-events: none; z-index: 0;
+        background:
+            radial-gradient(600px 300px at 15% 0%, rgba(99,102,241,0.14), transparent 70%),
+            radial-gradient(700px 350px at 90% 20%, rgba(168,85,247,0.12), transparent 70%),
+            radial-gradient(500px 300px at 50% 100%, rgba(59,130,246,0.10), transparent 70%);
+    }
+    section[data-testid="stSidebar"] {
+        background: linear-gradient(180deg, #0d1233 0%, #17124a 100%);
+        border-right: 1px solid rgba(139,92,246,0.35);
+        box-shadow: 4px 0 28px rgba(99,102,241,0.15);
+    }
     .stApp, .stApp p, .stApp div, .stApp span, .stApp label { color: #e4e4e7 !important; }
-    .stApp h1, .stApp h2, .stApp h3, .stApp h4 { color: #ffffff !important; font-weight: 700 !important; }
+    .stApp h1, .stApp h2, .stApp h3, .stApp h4 {
+        color: #ffffff !important; font-weight: 700 !important;
+        text-shadow: 0 0 18px rgba(139,92,246,0.28);
+    }
     .stMarkdown p { color: #e4e4e7 !important; font-weight: 500; }
     .stCaption { color: #a1a1aa !important; }
     section[data-testid="stSidebar"] p, section[data-testid="stSidebar"] div,
@@ -585,53 +681,100 @@ st.markdown(
         color: #e4e4e7 !important; font-weight: 500;
     }
     .hero {
-        background: linear-gradient(135deg, #4ade80 0%, #22d3ee 50%, #fbbf24 100%);
+        background: linear-gradient(135deg, #60a5fa 0%, #a78bfa 45%, #f472b6 90%);
         -webkit-background-clip: text; background-clip: text; color: transparent;
-        font-size: 2.8rem; font-weight: 900; letter-spacing: -0.02em; margin-bottom: 0;
+        font-size: 3.4rem; font-weight: 900; letter-spacing: -0.02em; margin-bottom: 0;
+        filter: drop-shadow(0 0 24px rgba(139,92,246,0.45));
+    }
+    .hero-underline {
+        height: 3px; width: 240px; margin: 0.5rem 0 0.9rem 0; border-radius: 3px;
+        background: linear-gradient(90deg, #60a5fa, #a78bfa, #f472b6);
+        box-shadow: 0 0 16px rgba(139,92,246,0.65);
     }
     .owner-badge {
-        display: inline-block; background: linear-gradient(135deg, #15803d, #0e7490);
+        display: inline-block; background: linear-gradient(135deg, #4c1d95, #7c3aed);
         color: white; font-size: 0.8rem; font-weight: 700; letter-spacing: 0.1em;
         padding: 0.35rem 1rem; border-radius: 20px; margin-bottom: 0.8rem;
-        box-shadow: 0 4px 15px rgba(21,128,61,0.4);
+        box-shadow: 0 4px 18px rgba(124,58,237,0.55);
+        border: 1px solid rgba(196,181,253,0.45);
     }
     .free-badge {
-        display: inline-block; background: linear-gradient(135deg, #16a34a, #4ade80);
-        color: #052e16; font-size: 0.8rem; font-weight: 900; letter-spacing: 0.1em;
+        display: inline-block; background: linear-gradient(135deg, #a78bfa, #f0abfc);
+        color: #2e1065; font-size: 0.8rem; font-weight: 900; letter-spacing: 0.1em;
         padding: 0.35rem 1rem; border-radius: 20px; margin-bottom: 0.8rem;
         margin-left: 0.5rem;
-        box-shadow: 0 4px 15px rgba(74,222,128,0.4);
+        box-shadow: 0 4px 18px rgba(167,139,250,0.55);
     }
     .sub { color: #a1a1aa; margin-top: 0.3rem; margin-bottom: 1.2rem; font-size: 1.05rem; }
     .stButton > button[kind="primary"] {
-        background: linear-gradient(135deg, #16a34a, #0891b2); border: none;
+        background: linear-gradient(135deg, #6366f1, #a855f7); border: none;
         font-weight: 700; border-radius: 12px; padding: 0.6rem 1.5rem;
-        box-shadow: 0 4px 20px rgba(22,163,74,0.4);
+        box-shadow: 0 4px 22px rgba(139,92,246,0.5);
+        transition: transform 0.15s ease, box-shadow 0.15s ease;
     }
-    .stButton > button:not([kind="primary"]) { border-radius: 10px; border: 1px solid #3f3f46; }
+    .stButton > button[kind="primary"]:hover {
+        box-shadow: 0 6px 30px rgba(139,92,246,0.75);
+        transform: translateY(-1px);
+    }
+    .stButton > button:not([kind="primary"]) {
+        border-radius: 10px; border: 1px solid rgba(139,92,246,0.45);
+        background: rgba(99,102,241,0.08);
+    }
+    .stButton > button:not([kind="primary"]):hover {
+        border-color: rgba(167,139,250,0.8);
+        background: rgba(99,102,241,0.16);
+    }
     .tip {
-        background: linear-gradient(135deg, rgba(22,163,74,0.15), rgba(8,145,178,0.08));
-        border: 1px solid rgba(74,222,128,0.3); border-radius: 14px;
+        background: linear-gradient(135deg, rgba(99,102,241,0.16), rgba(168,85,247,0.08));
+        border: 1px solid rgba(139,92,246,0.4); border-radius: 14px;
         padding: 0.9rem 1.2rem; margin: 0.8rem 0;
+        box-shadow: 0 4px 18px rgba(99,102,241,0.18);
     }
     .side-logo {
-        font-size: 1.5rem; font-weight: 900; margin-bottom: 0.2rem;
-        background: linear-gradient(135deg, #4ade80 0%, #22d3ee 100%);
+        font-size: 1.6rem; font-weight: 900; margin-bottom: 0.2rem;
+        background: linear-gradient(135deg, #60a5fa 0%, #a78bfa 60%, #f472b6 100%);
         -webkit-background-clip: text; background-clip: text; color: transparent;
+        filter: drop-shadow(0 0 10px rgba(139,92,246,0.4));
     }
     .tool-card {
-        background: #141a14; border: 1px solid #2a352a; border-radius: 14px;
+        background: linear-gradient(135deg, rgba(99,102,241,0.13), rgba(168,85,247,0.06));
+        border: 1px solid rgba(139,92,246,0.35); border-radius: 16px;
         padding: 1rem 1.2rem; margin: 0.6rem 0;
+        box-shadow: 0 6px 26px rgba(76,29,149,0.28);
     }
-    .footer { text-align: center; color: #71717a; font-size: 0.85rem;
-              margin-top: 0.5rem; padding-top: 1rem; border-top: 1px solid #232d23; }
+    .footer { text-align: center; color: #a5a5b8; font-size: 0.85rem;
+              margin-top: 0.5rem; padding-top: 1rem; border-top: 1px solid rgba(139,92,246,0.3); }
     .stTextInput > div > div > input, .stTextArea > div > div > textarea,
     .stSelectbox > div > div > div {
         border-radius: 10px; border: 1px solid #52525b;
-        background-color: #18181b !important; color: #ffffff !important;
+        background-color: #151528 !important; color: #ffffff !important;
         font-weight: 600 !important; font-size: 15px !important;
     }
-    .stExpander { border-radius: 12px; border: 1px solid #27272a; }
+    .stTextInput > div > div > input:focus, .stTextArea > div > div > textarea:focus {
+        border-color: #8b5cf6 !important;
+        box-shadow: 0 0 0 2px rgba(139,92,246,0.35) !important;
+    }
+    .stExpander { border-radius: 12px; border: 1px solid rgba(139,92,246,0.3); }
+    .stTabs [data-baseweb="tab-list"] { gap: 8px; }
+    .stTabs [data-baseweb="tab"] {
+        border-radius: 10px 10px 0 0; padding: 0.5rem 1.2rem;
+        color: #b8b8d0 !important; font-weight: 600;
+    }
+    .stTabs [aria-selected="true"] {
+        background: linear-gradient(135deg, rgba(99,102,241,0.25), rgba(168,85,247,0.15)) !important;
+        color: #ffffff !important;
+        border-bottom: 2px solid #a78bfa !important;
+    }
+    section[data-testid="stSidebar"] .stRadio > div { gap: 6px; }
+    section[data-testid="stSidebar"] .stRadio label {
+        border-radius: 10px; padding: 0.35rem 0.7rem;
+        border: 1px solid transparent;
+    }
+    section[data-testid="stSidebar"] .stRadio label:has(input:checked) {
+        background: linear-gradient(135deg, rgba(99,102,241,0.3), rgba(168,85,247,0.2));
+        border: 1px solid rgba(139,92,246,0.5);
+        box-shadow: 0 2px 12px rgba(139,92,246,0.3);
+    }
     footer { visibility: hidden; }
     #MainMenu { visibility: hidden; }
     header { visibility: hidden; }
@@ -643,7 +786,7 @@ st.markdown(
 
 _init_state()
 
-st.markdown('<p class="hero">🔧 EasyFix Agent</p>', unsafe_allow_html=True)
+st.markdown('<p class="hero">🔧 EasyFix Agent</p><div class="hero-underline"></div>', unsafe_allow_html=True)
 st.markdown('<span class="owner-badge">👑 Built for Muhammad Mudassir Yaseen</span>'
             '<span class="free-badge">💯 100% FREE — no paid credits, ever</span>',
             unsafe_allow_html=True)
@@ -652,7 +795,7 @@ st.markdown(
     'voiceovers. Everything free: free AI keys (signup only, no payment), '
     'free voiceovers, free stock video. '
     '<a href="https://www.easytofix.homes" '
-    'style="color:#4ade80;">easytofix.homes</a></p>',
+    'style="color:#a78bfa;">easytofix.homes</a></p>',
     unsafe_allow_html=True,
 )
 
@@ -760,7 +903,7 @@ with st.sidebar:
         '<p style="font-size:0.8rem;color:#71717a;text-align:center;">'
         '🔧 EasyFix Agent<br>👑 Muhammad Mudassir Yaseen<br>'
         '💯 100% FREE — no paid credits, ever<br>'
-        '<a href="https://www.easytofix.homes" style="color:#4ade80;">'
+        '<a href="https://www.easytofix.homes" style="color:#a78bfa;">'
         'easytofix.homes</a></p>',
         unsafe_allow_html=True,
     )
@@ -922,10 +1065,16 @@ elif page == "🎬 Video Studio":
     voice_label = st.selectbox("Voice", list(VOICES.keys()))
 
     if st.button("🚀 Generate Video", type="primary", use_container_width=True):
+        blocked = safety_check(prompt) or safety_check(voice_script)
         if not prompt.strip():
             st.error("Write a prompt first")
         elif mode == "🖼️ Image to Video" and not image_path:
             st.error("Upload an image first")
+        elif blocked:
+            # 🛡️ Misuse blocked — no video generated, no quota spent.
+            log_activity(user["name"],
+                         "blocked: misuse keywords in video prompt")
+            st.warning(blocked)
         else:
             kind = "t2v" if mode == "🎬 Text to Video" else "i2v"
             log_activity(user["name"], f"generated {kind} video")
@@ -972,8 +1121,13 @@ elif page == "🎙️ Voiceover Studio":
 
     if st.button("🎙️ Generate Voiceover", type="primary",
                  use_container_width=True):
+        blocked = safety_check(script)
         if not script.strip():
             st.error("Write a script first")
+        elif blocked:
+            # 🛡️ Misuse blocked — nothing generated.
+            log_activity(user["name"], "blocked: misuse keywords in voiceover")
+            st.warning(blocked)
         else:
             log_activity(user["name"], "generated voiceover")
             with st.spinner("🎙️ Generating voice…"):
@@ -1014,8 +1168,14 @@ elif page == "📝 Listing Generator":
                              placeholder="Same-day service, warranty info…")
 
     if st.button("✨ Generate Listing", type="primary", use_container_width=True):
+        blocked = safety_check(extra)
         if not city.strip():
             st.error("Enter a city")
+        elif blocked:
+            # 🛡️ Misuse blocked — no listing generated.
+            log_activity(user["name"],
+                         "blocked: misuse keywords in listing details")
+            st.warning(blocked)
         else:
             log_activity(user["name"],
                          f"generated listing: {service} in {city}")
@@ -1065,8 +1225,13 @@ elif page == "💬 Reply Assistant":
 
     if st.button("✨ Generate Replies", type="primary",
                  use_container_width=True):
+        blocked = safety_check(buyer_msg)
         if not buyer_msg.strip():
             st.error("Paste the buyer's message first")
+        elif blocked:
+            # 🛡️ Misuse blocked — the LLM is never called.
+            log_activity(user["name"], "blocked: misuse keywords in reply input")
+            st.warning(blocked)
         else:
             log_activity(user["name"], "generated buyer replies")
             with st.spinner("💬 Writing replies…"):
@@ -1119,6 +1284,10 @@ elif page == "🧠 Knowledge Base":
     4. **Video minimum:** 30 seconds per Short, vertical 9:16, no burned-in text
     5. **Post everywhere:** YouTube + Instagram + Dailymotion + Rumble
     6. **Manual posting:** never use bots on Facebook (account gets blocked)
+    7. **🛡️ No misuse, ever:** fraud, fake accounts/reviews, piracy, hacking,
+       spam, impersonation, fake documents — **koi bhi ghalat kaam nahi.**
+       The agent REFUSES such requests for everyone, including the admin.
+       Sahi mashwara do, ghalat kaam kabhi mat karo.
     """)
 
 
@@ -1300,7 +1469,7 @@ elif page == "📋 Surveys":
 st.markdown(
     '<p class="footer">🔧 <b>EasyFix Agent</b> — built for '
     '<b>Muhammad Mudassir Yaseen</b> · 💯 <b>100% FREE</b> — no paid credits, ever<br>'
-    '🌐 <a href="https://www.easytofix.homes" style="color:#4ade80;">'
+    '🌐 <a href="https://www.easytofix.homes" style="color:#a78bfa;">'
     'easytofix.homes</a> · 📞 +18312931196</p>',
     unsafe_allow_html=True,
 )
