@@ -559,6 +559,7 @@ ROLES = {
     "voice": "🎙️ Voiceover",
     "accounts": "🔑 Accounts",
     "templates": "📋 Templates",
+    "rotation": "🔄 Smart Accounts",
     "all": "🌟 All modules",
 }
 
@@ -629,9 +630,22 @@ def _init_state():
     if "msg_templates" not in st.session_state:
         st.session_state.msg_templates = dict(DEFAULT_MSG_TEMPLATES)
     if "account_vault" not in st.session_state:
-        # member name -> [{"platform": "Facebook", "email": "...", "note": "..."}]
+        # member name -> [{"platform": "Facebook", "email": "...", "note": "...",
+        #                  "status": "Active", "last_used": None,
+        #                  "uploads_today": 0, "uploads_date": "YYYY-MM-DD"}]
         # Passwords are NEVER stored — login always happens in the browser.
         st.session_state.account_vault = {}
+    if "acct_settings" not in st.session_state:
+        # Safe scheduling: min hours between uploads on one account,
+        # max uploads per account per day.
+        st.session_state.acct_settings = {"min_gap_hours": 2.0,
+                                          "daily_limit": 3}
+    if "last_suggested_acct" not in st.session_state:
+        st.session_state.last_suggested_acct = None
+    # Migrate any existing vault entries to smart-account fields (idempotent)
+    for _accts in st.session_state.account_vault.values():
+        for _e in _accts:
+            _ensure_acct_fields(_e)
 
 
 def log_activity(who: str, action: str):
@@ -652,6 +666,140 @@ def can_access(module_key: str) -> bool:
         return True
     roles = u.get("roles", [])
     return "all" in roles or module_key in roles
+
+
+# ----------------------------------------------------------------------------
+# 🔄 Smart Account Manager — helpers
+# (Rotation + safe scheduling. NO automation, NO ban evasion — the human
+# always uploads in their own browser.)
+# ----------------------------------------------------------------------------
+def _today_str() -> str:
+    return time.strftime("%Y-%m-%d")
+
+
+def _ensure_acct_fields(entry: dict):
+    """Fill smart-account defaults on a vault entry (idempotent)."""
+    entry.setdefault("status", "Active")  # Active / Resting / Flagged
+    entry.setdefault("last_used", None)  # "YYYY-MM-DD HH:MM" or None
+    entry.setdefault("uploads_today", 0)
+    entry.setdefault("uploads_date", _today_str())
+
+
+def _reset_daily_counts():
+    """Zero per-day upload counters when the calendar day rolls over."""
+    today = _today_str()
+    for accts in st.session_state.account_vault.values():
+        for e in accts:
+            _ensure_acct_fields(e)
+            if e.get("uploads_date") != today:
+                e["uploads_date"] = today
+                e["uploads_today"] = 0
+
+
+def _all_accounts():
+    """Return [(member, index, entry)] for every registered account."""
+    _reset_daily_counts()
+    out = []
+    for member, accts in st.session_state.account_vault.items():
+        for i, e in enumerate(accts):
+            _ensure_acct_fields(e)
+            out.append((member, i, e))
+    return out
+
+
+def _acct_key(member: str, entry: dict):
+    return (member, entry.get("platform"), entry.get("email"))
+
+
+def _rel_time(last_used):
+    """Human-friendly 'x hours ago' for a last_used timestamp."""
+    if not last_used:
+        return "never used"
+    try:
+        lu_ts = time.mktime(time.strptime(last_used, "%Y-%m-%d %H:%M"))
+    except Exception:
+        return "unknown"
+    mins = int((time.time() - lu_ts) / 60)
+    if mins < 1:
+        return "just now"
+    if mins < 60:
+        return f"{mins}m ago"
+    hrs = mins / 60
+    if hrs < 24:
+        return f"{hrs:.1f}h ago"
+    return f"{hrs / 24:.1f}d ago"
+
+
+def _suggest_account(platform: str):
+    """Smart round-robin suggestion.
+
+    Returns (member, idx, entry, note) or (None, None, None, reason).
+    Skips: non-Active status, daily limit reached, inside rest gap,
+    and (when 2+ candidates) the account suggested last time.
+    """
+    settings = st.session_state.acct_settings
+    gap = float(settings.get("min_gap_hours", 2))
+    limit = int(settings.get("daily_limit", 3))
+    now = time.time()
+    last_sug = st.session_state.get("last_suggested_acct")
+
+    rows = []  # (rest_score, member, idx, entry, skip_reason)
+    for member, i, e in _all_accounts():
+        if e.get("platform") != platform:
+            continue
+        if e.get("status") != "Active":
+            rows.append((0, member, i, e,
+                         f"{member}: status is {e.get('status')}"))
+            continue
+        if int(e.get("uploads_today", 0)) >= limit:
+            rows.append((0, member, i, e,
+                         f"{member}: daily limit reached ({limit}/day)"))
+            continue
+        lu = e.get("last_used")
+        if lu:
+            try:
+                lu_ts = time.mktime(time.strptime(lu, "%Y-%m-%d %H:%M"))
+            except Exception:
+                lu_ts = 0
+            hours_ago = (now - lu_ts) / 3600
+            if hours_ago < gap:
+                rows.append((0, member, i, e,
+                             f"{member}: resting "
+                             f"({gap - hours_ago:.1f}h left of {gap}h gap)"))
+                continue
+            rest_score = hours_ago
+        else:
+            rest_score = 9999  # never used → highest priority
+        rows.append((rest_score, member, i, e, None))
+
+    eligible = [r for r in rows if r[4] is None]
+    # Never suggest the same account twice in a row (when we have a choice)
+    if len(eligible) > 1 and last_sug:
+        filtered = [r for r in eligible
+                    if _acct_key(r[1], r[3]) != last_sug]
+        if filtered:
+            eligible = filtered
+
+    if not eligible:
+        reasons = [r[4] for r in rows if r[4]]
+        reason = "; ".join(reasons) if reasons else \
+            f"No {platform} accounts registered yet — add one in 🔑 Account Vault."
+        return None, None, None, reason
+
+    eligible.sort(key=lambda r: r[0], reverse=True)  # longest-rested first
+    _, member, i, e, _ = eligible[0]
+    note = (f"rested {_rel_time(e.get('last_used'))} • "
+            f"used {e.get('uploads_today', 0)}/{limit} today")
+    return member, i, e, note
+
+
+def _mark_uploaded(member: str, entry: dict, platform: str, who: str):
+    """Record an upload against an account and rotate the suggestion."""
+    entry["last_used"] = time.strftime("%Y-%m-%d %H:%M")
+    entry["uploads_today"] = int(entry.get("uploads_today", 0)) + 1
+    st.session_state.last_suggested_acct = _acct_key(member, entry)
+    log_activity(who, f"uploaded via {platform} "
+                      f"({_mask_email(entry.get('email'))})")
 
 
 # ----------------------------------------------------------------------------
@@ -946,6 +1094,8 @@ if can_access("replies"):
     PAGES.append("💬 Reply Assistant")
 if can_access("accounts"):
     PAGES.append("🔑 Account Vault")
+if can_access("rotation"):
+    PAGES.append("🔄 Smart Account Manager")
 if can_access("templates"):
     PAGES.append("📋 Message Templates")
 PAGES += ["🧠 Knowledge Base", "🔗 Tools Hub", "📋 Surveys"]
@@ -1494,6 +1644,187 @@ elif page == "💬 Reply Assistant":
                 except Exception as e:
                     st.error(f"❌ AI error: {e}. The free key may be invalid "
                              "or rate-limited.")
+
+
+# ----------------------------------------------------------------------------
+# 🔄 Smart Account Manager
+# Rotation + safe scheduling. The agent NEVER logs in or posts —
+# the human always uploads in their own browser.
+# ----------------------------------------------------------------------------
+elif page == "🔄 Smart Account Manager":
+    st.subheader("🔄 Smart Account Manager")
+    st.success("🛡️ **Smart scheduling keeps accounts safe.** This module only "
+               "*suggests* which account to use next and tracks rest limits — "
+               "it never logs in or uploads. **YOU upload in your browser.**")
+
+    settings = st.session_state.acct_settings
+    gap = float(settings.get("min_gap_hours", 2))
+    limit = int(settings.get("daily_limit", 3))
+
+    # --- 1. Which account should I use? ---
+    st.markdown("### 🎯 Which account should I use?")
+    rot_plat = st.selectbox(
+        "Platform",
+        ["YouTube", "Rumble", "Instagram", "Dailymotion", "Facebook"],
+        key="rot_platform")
+    member, idx, entry, note = _suggest_account(rot_plat)
+    if entry is None:
+        st.warning("⏸️ **Rest — no account available right now.**\n\n"
+                   f"{note}\n\n"
+                   "Try another platform, wait for the rest gap, or register "
+                   "more accounts in 🔑 Account Vault.")
+    else:
+        with st.container(border=True):
+            st.markdown(f"### ✅ Use: **{entry['platform']}** — "
+                        f"{_mask_email(entry.get('email'))}")
+            st.caption(f"👤 {member} • {note}")
+            if st.button("✅ Mark as uploaded", type="primary",
+                         key="rot_mark"):
+                _mark_uploaded(member, entry, rot_plat, user["name"])
+                st.success("✅ Logged! The next upload will rotate to "
+                           "another account.")
+                st.rerun()
+
+    st.divider()
+
+    # --- 2. Upload checklist ---
+    st.markdown("### 📋 Upload Checklist")
+    st.caption("Metadata is generated USA-targeted 🇺🇸 — copy it, upload in "
+               "your browser, then mark it done so rotation stays accurate.")
+    cc1, cc2 = st.columns(2)
+    with cc1:
+        chk_topic = st.text_input("Video topic", key="chk_topic",
+                                  placeholder="e.g. Leaky Faucet Fix")
+    with cc2:
+        chk_city = st.selectbox("📍 Target city (USA)",
+                                USA_CITIES_WITH_CUSTOM, key="chk_city")
+        if chk_city == "✏️ Custom…":
+            chk_city_val = st.text_input("Custom city", key="chk_city_custom",
+                                         placeholder="e.g. Austin, TX")
+        else:
+            chk_city_val = chk_city
+    if st.button("✨ Build checklist", key="chk_build"):
+        if not chk_topic.strip():
+            st.error("Enter the video topic")
+        elif not chk_city_val.strip():
+            st.error("Pick a target city")
+        else:
+            blocked = safety_check(chk_topic)
+            if blocked:
+                log_activity(user["name"],
+                             "blocked: misuse keywords in upload checklist")
+                st.warning(blocked)
+            else:
+                st.session_state.chk_meta = {
+                    "title": f"{chk_topic} in {chk_city_val} — $110",
+                    "desc": (
+                        f"🔧 {chk_topic} in {chk_city_val}, USA! 🇺🇸\n\n"
+                        f"Watch how our pros handle it — funny AND "
+                        f"educational!\n\n"
+                        f"💰 $110 flat — no hidden charges\n"
+                        f"📞 Call/Text: {PHONE}\n"
+                        f"🌐 {SITE_URL}\n\n"
+                        f"👍 Like & follow USA Trade Confessions for daily "
+                        f"home tips!"
+                    ),
+                    "tags": ("plumber, plumbing, hometips, USA, funny, "
+                             "diy, home repair, shorts, "
+                             f"{chk_city_val.replace(', ', ' ').replace(',', '')}, "
+                             "usatradeconfessions"),
+                    "city": chk_city_val,
+                    "topic": chk_topic,
+                    "platform": rot_plat,
+                }
+                log_activity(user["name"],
+                             f"built upload checklist: {chk_topic} "
+                             f"→ {chk_city_val}")
+    meta = st.session_state.get("chk_meta")
+    if meta:
+        st.markdown("**☑ 1. Account:** "
+                    f"{rot_plat} — see the suggestion above ☝️")
+        st.text_input("☑ 2. Title (copy)", value=meta["title"],
+                      key="chk_title")
+        st.text_area("☑ 3. Description (copy)", value=meta["desc"],
+                     height=180, key="chk_desc")
+        st.text_input("☑ 4. Tags (copy)", value=meta["tags"],
+                      key="chk_tags")
+        st.info(f"☑ 5. **Best time to post:** 7–9am or 6–8pm US Eastern "
+                f"gets the most views. Set video location to "
+                f"**{meta['city']}, USA** during upload. 🇺🇸")
+
+    with st.expander("⏰ Human-like timing tips"):
+        st.markdown("""
+        - 📅 **Space uploads out** — never post 2 videos within 30 minutes
+          on the same account.
+        - 🌙 **Let accounts rest** — the rotation above enforces a rest gap
+          automatically.
+        - 🎭 **Vary your content** — same title/description on every video
+          looks like spam. Tweak the topic each time.
+        - 👀 **Watch for warnings** — if a platform ever flags an account,
+          set its status to **Flagged** in the health dashboard below and
+          stop using it until the admin reviews it.
+        - 🧍 **You are the human** — the agent prepares, you click. That's
+          what keeps accounts alive.
+        """)
+
+    # --- 3. Admin: health dashboard + scheduling settings ---
+    if is_admin:
+        st.divider()
+        st.markdown("### 🏥 Account Health Dashboard")
+        rows = _all_accounts()
+        if not rows:
+            st.info("No accounts registered yet — team members add them in "
+                    "🔑 Account Vault.")
+        else:
+            for m_name, a_idx, a in rows:
+                with st.container(border=True):
+                    c1, c2, c3 = st.columns([3, 2, 2])
+                    with c1:
+                        st.markdown(f"**{a['platform']}** — "
+                                    f"{_mask_email(a.get('email'))}")
+                        st.caption(f"👤 {m_name}")
+                    with c2:
+                        st.caption(f"📤 {a.get('uploads_today', 0)}/{limit} today")
+                        st.caption(f"🕒 last: {_rel_time(a.get('last_used'))}")
+                    with c3:
+                        new_status = st.selectbox(
+                            "Status",
+                            ["Active", "Resting", "Flagged"],
+                            index=["Active", "Resting", "Flagged"].index(
+                                a.get("status", "Active")),
+                            key=f"acctstat_{m_name}_{a_idx}")
+                        if new_status != a.get("status"):
+                            a["status"] = new_status
+                            log_activity("Admin",
+                                         f"set {m_name}'s {a['platform']} "
+                                         f"account to {new_status}")
+                            st.rerun()
+
+        st.divider()
+        st.markdown("### ⚙️ Safe Scheduling Settings")
+        st.caption("Applies to every account, every team member.")
+        sc1, sc2 = st.columns(2)
+        with sc1:
+            new_gap = st.number_input(
+                "⏳ Min hours between uploads (same account)",
+                min_value=0.5, max_value=24.0, step=0.5,
+                value=float(settings.get("min_gap_hours", 2)),
+                key="acct_gap")
+        with sc2:
+            new_limit = st.number_input(
+                "📊 Max uploads per account per day",
+                min_value=1, max_value=10, step=1,
+                value=int(settings.get("daily_limit", 3)),
+                key="acct_limit")
+        if st.button("💾 Save scheduling settings", type="primary",
+                     key="acct_save"):
+            st.session_state.acct_settings = {"min_gap_hours": float(new_gap),
+                                              "daily_limit": int(new_limit)}
+            log_activity("Admin",
+                         f"updated scheduling: {new_gap}h gap, "
+                         f"{new_limit}/day limit")
+            st.success("✅ Saved — applies immediately.")
+            st.rerun()
 
 
 # ----------------------------------------------------------------------------
