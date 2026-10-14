@@ -76,6 +76,13 @@ SITE_URL = "https://www.easytofix.homes"
 DEFAULT_PHONE = "+18312931196"
 PHONE = "+18312931196"
 
+# 📍 USA location presets — all generated content defaults to USA targeting.
+USA_CITIES = [
+    "Houston, TX", "Dallas, TX", "Miami, FL", "Orlando, FL",
+    "Tampa, FL", "Atlanta, GA", "Phoenix, AZ", "Los Angeles, CA",
+]
+USA_CITIES_WITH_CUSTOM = USA_CITIES + ["✏️ Custom…"]
+
 # ----------------------------------------------------------------------------
 # Public AI video engines (white-labeled — no third-party names shown)
 # ----------------------------------------------------------------------------
@@ -1236,6 +1243,72 @@ elif page == "🎬 Video Studio":
                                mime="video/mp4", type="primary",
                                use_container_width=True)
 
+    # ------------------------------------------------------------------
+    # 📤 Upload Metadata — USA-targeted, copy-paste ready for
+    # YouTube / Rumble / Instagram / Dailymotion.
+    # ------------------------------------------------------------------
+    st.divider()
+    st.subheader("📤 Upload Metadata — USA Targeted 🇺🇸")
+    st.caption("Copy-paste ready for YouTube, Rumble, Instagram & Dailymotion. "
+               "Everything defaults to USA targeting.")
+
+    mc1, mc2 = st.columns(2)
+    with mc1:
+        meta_city = st.selectbox("📍 Target city (USA)", USA_CITIES_WITH_CUSTOM,
+                                 key="meta_city",
+                                 help="Used in the title and as the video "
+                                      "location suggestion.")
+        if meta_city == "✏️ Custom…":
+            meta_city_val = st.text_input("Custom city", key="meta_city_custom",
+                                          placeholder="e.g. Austin, TX")
+        else:
+            meta_city_val = meta_city
+    with mc2:
+        meta_topic = st.text_input("Video topic", key="meta_topic",
+                                   placeholder="e.g. Leaky Faucet Fix")
+
+    if st.button("✨ Generate Upload Metadata", type="secondary",
+                 use_container_width=True):
+        if not meta_city_val.strip():
+            st.error("Pick a target city")
+        elif not meta_topic.strip():
+            st.error("Enter the video topic")
+        else:
+            blocked = safety_check(meta_topic)
+            if blocked:
+                log_activity(user["name"],
+                             "blocked: misuse keywords in upload metadata")
+                st.warning(blocked)
+            else:
+                log_activity(user["name"],
+                             f"generated upload metadata: {meta_topic} "
+                             f"→ {meta_city_val}")
+                meta_title = f"{meta_topic} in {meta_city_val} — $110"
+                meta_desc = (
+                    f"🔧 {meta_topic} in {meta_city_val}, USA! 🇺🇸\n\n"
+                    f"Watch how our pros handle it — funny AND educational!\n\n"
+                    f"💰 $110 flat — no hidden charges\n"
+                    f"📞 Call/Text: {PHONE}\n"
+                    f"🌐 {SITE_URL}\n\n"
+                    f"👍 Like & follow USA Trade Confessions for daily "
+                    f"home tips!"
+                )
+                meta_tags = ("plumber, plumbing, hometips, USA, funny, "
+                             "diy, home repair, shorts, "
+                             f"{meta_city_val.replace(', ', ' ').replace(',', '')}, "
+                             "usatradeconfessions")
+                st.text_input("📺 Title (copy)", value=meta_title,
+                              key="meta_title")
+                st.text_area("📝 Description (copy)", value=meta_desc,
+                             height=220, key="meta_desc")
+                st.text_input("🏷️ Tags (copy)", value=meta_tags,
+                              key="meta_tags")
+                st.info(
+                    "📍 **Location tip:** Set the video location to "
+                    f"**{meta_city_val}, USA** in YouTube Studio during "
+                    "upload for better local reach. 🇺🇸"
+                )
+
 
 # ----------------------------------------------------------------------------
 # 🎙️ Voiceover Studio
@@ -1289,7 +1362,14 @@ elif page == "📝 Listing Generator":
             "Toilet Repair", "Water Heater Service", "Pipe Repair",
             "Garbage Disposal", "Sewer Line", "Fixture Installation",
             "Emergency Plumbing", "General Handyman"])
-        city = st.text_input("City", placeholder="e.g. Houston")
+        # 📍 USA location preset — defaults to USA targeting.
+        city_choice = st.selectbox("📍 City (USA)", USA_CITIES_WITH_CUSTOM,
+                                   help="Every listing is USA-targeted by default.")
+        if city_choice == "✏️ Custom…":
+            city = st.text_input("Custom city", placeholder="e.g. Austin, TX")
+        else:
+            city = city_choice
+            st.caption(f"🎯 Targeting: {city}, USA")
         price = st.text_input("Price", value="$110")
     with c2:
         condition = st.selectbox("Condition", ["New service", "Repair", "Install"])
@@ -1310,7 +1390,7 @@ elif page == "📝 Listing Generator":
                          f"generated listing: {service} in {city}")
             title = f"{service} in {city} — {price}"
             desc = (
-                f"🔧 {service} in {city}!\n\n"
+                f"🔧 {service} in {city}, USA! 🇺🇸\n\n"
                 f"✅ Professional service — {price} flat\n"
                 f"✅ {condition}\n"
                 f"✅ Licensed & insured pros\n"
@@ -1321,7 +1401,7 @@ elif page == "📝 Listing Generator":
             desc += (
                 f"\n📞 Call/Text: {PHONE}\n"
                 f"🌐 {SITE_URL}\n\n"
-                f"USA Trade Confessions — trusted home services!"
+                f"USA Trade Confessions — trusted home services across the USA!"
             )
             st.markdown("### 📋 Your listing")
             st.text_input("Title (copy)", value=title, key="lst_title")
