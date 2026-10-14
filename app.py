@@ -73,6 +73,7 @@ DEFAULT_ADMIN_PASSWORD = "easyfix123"
 # Branding
 OWNER_NAME = "Muhammad Mudassir Yaseen"
 SITE_URL = "https://www.easytofix.homes"
+DEFAULT_PHONE = "+18312931196"
 PHONE = "+18312931196"
 
 # ----------------------------------------------------------------------------
@@ -549,8 +550,52 @@ ROLES = {
     "listings": "📝 Listings",
     "replies": "💬 Replies",
     "voice": "🎙️ Voiceover",
+    "accounts": "🔑 Accounts",
+    "templates": "📋 Templates",
     "all": "🌟 All modules",
 }
+
+
+# ----------------------------------------------------------------------------
+# 📞 Service numbers (admin-managed) + 📋 Message templates (admin-managed)
+# ----------------------------------------------------------------------------
+DEFAULT_SERVICE_NUMBERS = {
+    "Default": "+18312931196",
+    "Plumbing": "+18312931196",
+}
+
+DEFAULT_MSG_TEMPLATES = {
+    "👋 Greeting": (
+        "Salam {name}! EasyFix ki taraf se khush amdeed. "
+        "Kaise madad kar sakta hun?"
+    ),
+    "💰 Price Quote": (
+        "Salam {name}! Ji haan, {service} ka kaam {price} flat hai — "
+        "koi hidden charges nahi. Kab ana hai? 📞 {phone}"
+    ),
+    "🔧 Service Info": (
+        "Salam {name}! EasyFix mein hum {service} karte hain — "
+        "licensed, insured pros. Details: {website} "
+        "ya call kar lein 📞 {phone}"
+    ),
+    "⏳ Follow-up": (
+        "Salam {name}, EasyFix ki taraf se follow-up! Aap ne {service} "
+        "ke bare mein poocha tha. Abhi bhi chahiye to bata dein 📞 {phone}"
+    ),
+    "✅ Closing": (
+        "Shukriya {name}! Kaam pakka ho gaya. Koi aur masla ho to "
+        "yaad karna — EasyFix hamesha hazir 🙌 {website}"
+    ),
+}
+
+
+def _mask_email(email: str) -> str:
+    """Mask an email for display: j***@gmail.com. Passwords are never stored."""
+    e = (email or "").strip()
+    if "@" not in e:
+        return "***"
+    local, domain = e.split("@", 1)
+    return (local[:1] + "***@" + domain) if local else "***@" + domain
 
 
 def _init_state():
@@ -572,6 +617,14 @@ def _init_state():
         st.session_state.llm_model = GROQ_MODELS[0]
     if "videos_made" not in st.session_state:
         st.session_state.videos_made = 0
+    if "service_numbers" not in st.session_state:
+        st.session_state.service_numbers = dict(DEFAULT_SERVICE_NUMBERS)
+    if "msg_templates" not in st.session_state:
+        st.session_state.msg_templates = dict(DEFAULT_MSG_TEMPLATES)
+    if "account_vault" not in st.session_state:
+        # member name -> [{"platform": "Facebook", "email": "...", "note": "..."}]
+        # Passwords are NEVER stored — login always happens in the browser.
+        st.session_state.account_vault = {}
 
 
 def log_activity(who: str, action: str):
@@ -884,6 +937,10 @@ if can_access("listings"):
     PAGES.append("📝 Listing Generator")
 if can_access("replies"):
     PAGES.append("💬 Reply Assistant")
+if can_access("accounts"):
+    PAGES.append("🔑 Account Vault")
+if can_access("templates"):
+    PAGES.append("📋 Message Templates")
 PAGES += ["🧠 Knowledge Base", "🔗 Tools Hub", "📋 Surveys"]
 
 with st.sidebar:
@@ -938,8 +995,9 @@ if page == "👑 Admin Panel":
     st.subheader("👑 Admin Panel")
     st.caption("Manage your team — they work under you with limited access.")
 
-    tab1, tab2, tab3, tab4 = st.tabs(
-        ["👥 Team Members", "🔑 API Key", "📊 Activity Log", "⚙️ Settings"])
+    tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs(
+        ["👥 Team Members", "🔑 API Key", "📊 Activity Log",
+         "📋 Templates", "📞 Numbers", "⚙️ Settings"])
 
     with tab1:
         st.markdown("### Add team member")
@@ -975,6 +1033,13 @@ if page == "👑 Admin Panel":
                 with c1:
                     st.markdown(f"**{m['name']}**")
                     st.caption(f"Code: `{code}`")
+                    accts = st.session_state.account_vault.get(m["name"], [])
+                    if accts:
+                        st.caption("🔑 " + ", ".join(
+                            f"{a['platform']} ({_mask_email(a['email'])})"
+                            for a in accts))
+                    else:
+                        st.caption("🔑 No accounts registered")
                 with c2:
                     st.caption(", ".join(ROLES[r] for r in m["roles"]))
                 with c3:
@@ -1010,6 +1075,70 @@ if page == "👑 Admin Panel":
             st.caption(f"`{a['time']}` — **{a['who']}**: {a['action']}")
 
     with tab4:
+        st.markdown("### 📋 Message Templates")
+        st.caption("Templates the team uses for customer messages. "
+                   "Variables: {name} {service} {price} {phone} {website}")
+        t_name = st.text_input("Template name", key="tpl_name",
+                               placeholder="e.g. 🚚 Dispatch Update")
+        t_body = st.text_area("Template text", key="tpl_body", height=100,
+                              placeholder="Salam {name}! ... 📞 {phone}")
+        if st.button("➕ Save template", type="primary"):
+            if not t_name.strip() or not t_body.strip():
+                st.error("Name and text both required")
+            else:
+                st.session_state.msg_templates[t_name.strip()] = t_body.strip()
+                log_activity("Admin", f"saved template '{t_name.strip()}'")
+                st.success(f"✅ Template '{t_name.strip()}' saved")
+                st.rerun()
+        st.divider()
+        for name, body in list(st.session_state.msg_templates.items()):
+            with st.container(border=True):
+                c1, c2 = st.columns([5, 1])
+                with c1:
+                    st.markdown(f"**{name}**")
+                    st.caption(body)
+                with c2:
+                    if st.button("🗑️", key=f"tpldel_{name}"):
+                        del st.session_state.msg_templates[name]
+                        log_activity("Admin", f"deleted template '{name}'")
+                        st.rerun()
+
+    with tab5:
+        st.markdown("### 📞 Service Numbers")
+        st.caption("Numbers auto-inserted into templates and AI replies.")
+        for svc in list(st.session_state.service_numbers.keys()):
+            c1, c2, c3 = st.columns([2, 3, 1])
+            with c1:
+                st.markdown(f"**{svc}**")
+            with c2:
+                new_num = st.text_input("Number", key=f"num_{svc}",
+                                        value=st.session_state.service_numbers[svc])
+            with c3:
+                st.write("")
+                if st.button("💾", key=f"numsv_{svc}"):
+                    st.session_state.service_numbers[svc] = new_num.strip()
+                    log_activity("Admin", f"updated number for {svc}")
+                    st.success("✅ Saved")
+                if svc != "Default" and st.button("🗑️", key=f"numdel_{svc}"):
+                    del st.session_state.service_numbers[svc]
+                    log_activity("Admin", f"removed number for {svc}")
+                    st.rerun()
+        st.divider()
+        c1, c2 = st.columns(2)
+        with c1:
+            ns = st.text_input("New service", key="num_new_svc",
+                               placeholder="e.g. Electrical")
+        with c2:
+            nn = st.text_input("New number", key="num_new_num",
+                               placeholder="+1…")
+        if st.button("➕ Add number", type="primary"):
+            if ns.strip() and nn.strip():
+                st.session_state.service_numbers[ns.strip()] = nn.strip()
+                log_activity("Admin", f"added number for {ns.strip()}")
+                st.success("✅ Added")
+                st.rerun()
+
+    with tab6:
         st.markdown("### Change admin password")
         npw = st.text_input("New password", type="password", key="npw")
         if st.button("💾 Update password", type="primary"):
@@ -1208,9 +1337,10 @@ elif page == "📝 Listing Generator":
 # 💬 Reply Assistant
 # ----------------------------------------------------------------------------
 elif page == "💬 Reply Assistant":
-    st.subheader("💬 Buyer Reply Assistant")
-    st.caption("Paste a buyer's message → get 3 professional reply drafts. "
-               "Copy the best one and send it yourself.")
+    st.subheader("💬 Buyer Reply Assistant — Human Mode 🧑")
+    st.caption("Paste a buyer's message → get 3 NATURAL replies that sound "
+               "like a real person texting — not a robot. Copy the best one "
+               "and send it yourself.")
 
     if not st.session_state.llm_key:
         st.warning("⚠️ The admin hasn't added the free AI key yet "
@@ -1220,10 +1350,16 @@ elif page == "💬 Reply Assistant":
 
     buyer_msg = st.text_area("Buyer's message", height=100,
                              placeholder="Paste what the buyer wrote…")
-    tone = st.selectbox("Tone", ["Friendly & professional", "Short & direct",
-                                 "Warm & detailed"])
+    c1, c2 = st.columns(2)
+    with c1:
+        tone = st.selectbox("Tone", ["Friendly 🙂", "Professional 💼",
+                                     "Casual 😎"])
+    with c2:
+        svc_list = list(st.session_state.service_numbers.keys())
+        svc = st.selectbox("Service", svc_list)
+    phone = st.session_state.service_numbers.get(svc, DEFAULT_PHONE)
 
-    if st.button("✨ Generate Replies", type="primary",
+    if st.button("✨ Generate Human Replies", type="primary",
                  use_container_width=True):
         blocked = safety_check(buyer_msg)
         if not buyer_msg.strip():
@@ -1233,16 +1369,36 @@ elif page == "💬 Reply Assistant":
             log_activity(user["name"], "blocked: misuse keywords in reply input")
             st.warning(blocked)
         else:
-            log_activity(user["name"], "generated buyer replies")
-            with st.spinner("💬 Writing replies…"):
+            log_activity(user["name"], "generated buyer replies (human mode)")
+            with st.spinner("💬 Writing like a human…"):
                 try:
+                    tone_guide = {
+                        "Friendly 🙂": ("warm, friendly and natural, like texting "
+                                        "a friend"),
+                        "Professional 💼": ("polite and confident, but still "
+                                            "natural — never stiff"),
+                        "Casual 😎": ("very casual and relaxed, like chatting "
+                                      "on WhatsApp"),
+                    }[tone]
                     system = (
-                        "You are the customer-service assistant for EasyFix "
-                        f"({SITE_URL}), owned by Muhammad Mudassir Yaseen. "
-                        "Services cost $110 flat. Phone: +18312931196. "
-                        f"Tone: {tone}. Write in American English. "
+                        "You are a real human customer-service person for "
+                        "EasyFix (https://www.easytofix.homes), owned by "
+                        "Muhammad Mudassir Yaseen. You text customers in "
+                        "NATURAL Roman Urdu mixed with simple English — "
+                        "exactly like a real Pakistani person texting. "
+                        "Use contractions, short sentences, warm casual flow. "
+                        "NEVER sound like an AI or a corporate robot. "
+                        "No stiff formal language. "
+                        f"Tone: {tone_guide}. "
+                        f"Service: {svc}. Price: $110 flat (no hidden charges). "
+                        f"Phone: {phone}. Website: https://www.easytofix.homes. "
+                        "Weave the phone and website into replies naturally "
+                        "(not in every single one). "
+                        "Example style: 'Salam bhai! Ji haan, drain cleaning "
+                        "ho jayegi. $110 flat hai, koi hidden charges nahi. "
+                        "Kab ana hai?' "
                         "Generate exactly 3 different reply drafts, numbered "
-                        "1-3, each 2-4 sentences. Be helpful, never pushy."
+                        "1-3, each 1-3 sentences."
                     )
                     out = llm_complete(
                         st.session_state.llm_key,
@@ -1251,13 +1407,101 @@ elif page == "💬 Reply Assistant":
                         [{"role": "system", "content": system},
                          {"role": "user",
                           "content": f"Buyer wrote: {buyer_msg.strip()}"}])
-                    st.markdown("### 📋 Reply drafts")
+                    st.markdown("### 📋 Human-style reply drafts")
                     st.markdown(out)
                     st.caption("Copy the best draft and send it manually. "
-                               "Always include the website link: " + SITE_URL)
+                               "Phone + website are already inside the drafts.")
                 except Exception as e:
                     st.error(f"❌ AI error: {e}. The free key may be invalid "
                              "or rate-limited.")
+
+
+# ----------------------------------------------------------------------------
+# 🔑 Account Vault
+# ----------------------------------------------------------------------------
+elif page == "🔑 Account Vault":
+    st.subheader("🔑 Account Vault")
+    st.warning("⚠️ **Agent drafts everything — YOU click send in your browser.**\n\n"
+               "Auto-login or auto-posting gets accounts BANNED by Facebook/YouTube. "
+               "Never type your password into this app.")
+    st.info("🔒 Passwords are NEVER stored here. Only account emails are saved "
+            "(masked), so the admin knows which accounts each member uses.")
+
+    st.markdown("### Add your account")
+    c1, c2 = st.columns(2)
+    with c1:
+        platform = st.selectbox("Platform", ["Facebook", "YouTube",
+                                             "Instagram", "Dailymotion", "Rumble"],
+                                key="vault_platform")
+    with c2:
+        email = st.text_input("Account email", key="vault_email",
+                              placeholder="your@email.com")
+    note = st.text_input("Note (optional)", key="vault_note",
+                         placeholder="e.g. marketplace profile")
+    if st.button("➕ Save account", type="primary"):
+        if not email.strip() or "@" not in email:
+            st.error("Enter a valid email")
+        else:
+            name = user["name"]
+            st.session_state.account_vault.setdefault(name, []).append(
+                {"platform": platform, "email": email.strip(),
+                 "note": note.strip()})
+            log_activity(name, f"registered {platform} account")
+            st.success(f"✅ {platform} account saved (email masked)")
+            st.rerun()
+
+    st.divider()
+    st.markdown("### Your accounts")
+    mine = st.session_state.account_vault.get(user["name"], [])
+    if not mine:
+        st.info("No accounts registered yet.")
+    for i, a in enumerate(mine):
+        with st.container(border=True):
+            c1, c2 = st.columns([4, 1])
+            with c1:
+                st.markdown(f"**{a['platform']}** — {_mask_email(a['email'])}")
+                if a.get("note"):
+                    st.caption(a["note"])
+            with c2:
+                if st.button("🗑️", key=f"vaultdel_{i}"):
+                    del st.session_state.account_vault[user["name"]][i]
+                    log_activity(user["name"], f"removed {a['platform']} account")
+                    st.rerun()
+
+
+# ----------------------------------------------------------------------------
+# 📋 Message Templates
+# ----------------------------------------------------------------------------
+elif page == "📋 Message Templates":
+    st.subheader("📋 Message Templates")
+    st.caption("Pick a template → fill the blanks → copy → send. "
+               "Templates are managed by the admin.")
+
+    if not st.session_state.msg_templates:
+        st.info("No templates yet — ask the admin to add some.")
+    else:
+        tpl_name = st.selectbox("Template",
+                                list(st.session_state.msg_templates.keys()))
+        body = st.session_state.msg_templates[tpl_name]
+
+        c1, c2 = st.columns(2)
+        with c1:
+            cust_name = st.text_input("Customer name", key="tpl_cust_name",
+                                      placeholder="e.g. John")
+        with c2:
+            svc_list = list(st.session_state.service_numbers.keys())
+            tpl_svc = st.selectbox("Service", svc_list, key="tpl_svc")
+        phone = st.session_state.service_numbers.get(tpl_svc, DEFAULT_PHONE)
+
+        filled = (body
+                  .replace("{name}", cust_name.strip() or "[Name]")
+                  .replace("{service}", tpl_svc)
+                  .replace("{price}", "$110")
+                  .replace("{phone}", phone)
+                  .replace("{website}", SITE_URL))
+        st.markdown("### 📝 Ready message")
+        st.text_area("Copy this", value=filled, height=130, key="tpl_out")
+        st.caption("Tap the text → copy → paste into Messenger/WhatsApp/FB.")
 
 
 # ----------------------------------------------------------------------------
