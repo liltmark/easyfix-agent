@@ -648,6 +648,16 @@ def _init_state():
             _ensure_acct_fields(_e)
 
 
+def _get_json(url: str, timeout: int = 8):
+    """Fetch JSON from a URL (free APIs). Returns dict or None."""
+    try:
+        req = urllib.request.Request(url, headers={"User-Agent": "EasyFixAgent/1.0"})
+        with urllib.request.urlopen(req, timeout=timeout) as r:
+            return json.loads(r.read().decode("utf-8"))
+    except Exception:
+        return None
+
+
 def log_activity(who: str, action: str):
     st.session_state.activity.append({
         "time": time.strftime("%Y-%m-%d %H:%M"),
@@ -1098,7 +1108,7 @@ if can_access("rotation"):
     PAGES.append("🔄 Smart Account Manager")
 if can_access("templates"):
     PAGES.append("📋 Message Templates")
-PAGES += ["🧠 Knowledge Base", "🔗 Tools Hub", "📋 Surveys"]
+PAGES += ["🛡️ Safety Toolkit", "🧠 Knowledge Base", "🔗 Tools Hub", "📋 Surveys"]
 
 with st.sidebar:
     st.markdown('<p class="side-logo">🔧 EasyFix Agent</p>', unsafe_allow_html=True)
@@ -1538,6 +1548,11 @@ elif page == "📝 Listing Generator":
         else:
             log_activity(user["name"],
                          f"generated listing: {service} in {city}")
+            # 🔀 Save base details so the Variation Engine can build on them.
+            st.session_state.lst_base = {
+                "service": service, "city": city, "price": price,
+                "condition": condition, "extra": extra,
+            }
             title = f"{service} in {city} — {price}"
             desc = (
                 f"🔧 {service} in {city}, USA! 🇺🇸\n\n"
@@ -1561,6 +1576,205 @@ elif page == "📝 Listing Generator":
                        "Facebook Marketplace manually.")
             st.caption("⚠️ Always post manually — automated posting gets "
                        "blocked by Facebook.")
+
+    # ------------------------------------------------------------------
+    # 🔀 Listing Variation Engine — unique versions per team member so
+    # Facebook never sees duplicate text (duplicates = spam = ban).
+    # ------------------------------------------------------------------
+    if st.session_state.get("lst_base"):
+        st.markdown("---")
+        st.subheader("🔀 Listing Variation Engine")
+        st.caption("One team = one text each. Generate 5 unique versions — "
+                   "no two members should post the same wording.")
+        base = st.session_state.lst_base
+
+        def _parse_variations(text):
+            import re
+            chunks = re.split(r"(?im)^VARIATION\s+\d+\s*$", text)
+            out = []
+            for ch in chunks:
+                ch = ch.strip()
+                if not ch:
+                    continue
+                mt = re.search(r"(?im)^TITLE:\s*(.+)$", ch)
+                title = mt.group(1).strip() if mt else ""
+                md = re.search(r"(?im)^DESC:\s*\n?(.*)$", ch, re.DOTALL)
+                desc = md.group(1).strip() if md else ""
+                desc = re.sub(r"\n?^---+\s*$", "", desc, flags=re.M).strip()
+                if title or desc:
+                    out.append({"title": title, "desc": desc})
+            return out[:5]
+
+        def _build_template_variations(b):
+            svc, cty, prc = b["service"], b["city"], b["price"]
+            cond, xtra = b["condition"], b["extra"].strip()
+            xb = f"✅ {xtra}\n" if xtra else ""
+            xp = f"{xtra} " if xtra else ""
+            xe = f"🌟 {xtra} 🌟\n" if xtra else ""
+            xs = f"{xtra} " if xtra else ""
+            xd = f"- {xtra}\n" if xtra else ""
+            return [
+                {"title": f"Professional {svc} in {cty} — {prc} Flat Rate",
+                 "desc": (
+                     f"🔧 Looking for reliable {svc} in {cty}? We've got you "
+                     f"covered! 🇺🇸\n\n"
+                     f"✔️ {cond}\n"
+                     f"✔️ {prc} flat — no hidden charges\n"
+                     f"✔️ Licensed & insured professionals\n"
+                     f"✔️ Same-day service available\n"
+                     f"{xb}"
+                     f"\n📞 Call or Text: {PHONE}\n"
+                     f"🌐 {SITE_URL}\n\n"
+                     f"USA Trade Confessions — trusted home services across "
+                     f"the USA!"
+                 )},
+                {"title": f"{svc} — {cty} — {prc}",
+                 "desc": (
+                     f"Hi! We offer {svc} in {cty} for a {prc} flat rate. "
+                     f"{cond} work done by licensed and insured pros, and "
+                     f"same-day service is usually available. No hidden charges "
+                     f"— what you see is what you pay. {xp}Call or text us at "
+                     f"{PHONE}, or visit {SITE_URL} for more info. USA Trade "
+                     f"Confessions, serving homes across the USA."
+                 )},
+                {"title": f"🔧 {svc} {cty} 🇺🇸 {prc}",
+                 "desc": (
+                     f"🚨 Need {svc} in {cty}?! 🚨\n"
+                     f"💰 ONLY {prc} FLAT!! 💰\n"
+                     f"✅✅ Licensed Pros ✅✅\n"
+                     f"⚡ Same-Day Service ⚡\n"
+                     f"🛠️ {cond} 🛠️\n"
+                     f"{xe}"
+                     f"📲📲 {PHONE} 📲📲\n"
+                     f"🌐🌐 {SITE_URL} 🌐🌐\n"
+                     f"⭐ USA Trade Confessions ⭐"
+                 )},
+                {"title": f"{cty} {svc} – {prc} Flat",
+                 "desc": (
+                     f"{svc} — {cty}. {prc} flat. {cond}. Licensed & insured. "
+                     f"Same-day available. {xs}{PHONE} | {SITE_URL}"
+                 )},
+                {"title": f"Affordable {svc} Service in {cty}, USA — {prc}",
+                 "desc": (
+                     f"USA Trade Confessions — Home Services ({cty}, USA) 🇺🇸\n\n"
+                     f"Service: {svc}\n"
+                     f"Type: {cond}\n"
+                     f"Price: {prc} flat rate (no hidden fees)\n"
+                     f"Coverage: {cty} and nearby areas\n\n"
+                     f"Why choose us:\n"
+                     f"- Licensed & insured professionals\n"
+                     f"- Same-day service available\n"
+                     f"- Upfront {prc} pricing\n"
+                     f"{xd}"
+                     f"\n📞 {PHONE}\n"
+                     f"🌐 {SITE_URL}"
+                 )},
+            ]
+
+        if st.button("🔀 Generate 5 Unique Variations", type="secondary",
+                      use_container_width=True):
+            blocked = safety_check(base.get("extra", ""))
+            if blocked:
+                log_activity(user["name"],
+                             "blocked: misuse keywords in variation input")
+                st.warning(blocked)
+            else:
+                variations = []
+                if st.session_state.llm_key:
+                    with st.spinner("🔀 Writing 5 unique versions…"):
+                        try:
+                            sys_msg = (
+                                "You are writing 5 UNIQUE Facebook Marketplace "
+                                "listing variations for a US home-services business "
+                                "(EasyFix, https://www.easytofix.homes, owner "
+                                "Muhammad Mudassir Yaseen). Make all 5 genuinely "
+                                "different: vary title phrasing, description structure "
+                                "(one paragraph-style, one bullet-style, one casual, "
+                                "one professional, one emoji-heavy), opening line, "
+                                "call-to-action, and emoji density (at least one with "
+                                "ZERO emojis). Every variation MUST include: the service "
+                                "name, the city, the price, the phone number, and "
+                                "https://www.easytofix.homes. Keep each description "
+                                "under 120 words, titles under 60 characters. "
+                                "Plain text only — no markdown bold or italics."
+                            )
+                            user_msg = (
+                                f"Service: {base['service']}. "
+                                f"City: {base['city']}, USA. "
+                                f"Price: {base['price']} flat. "
+                                f"Type: {base['condition']}. "
+                                f"Phone: {PHONE}. "
+                                f"Extra details: {base['extra'].strip() or 'none'}.\n\n"
+                                "FORMAT (follow exactly):\n"
+                                "VARIATION 1\nTITLE: <title>\nDESC:\n<description>\n---\n"
+                                "VARIATION 2\nTITLE: <title>\nDESC:\n<description>\n---\n"
+                                "... through VARIATION 5."
+                            )
+                            out = llm_complete(
+                                st.session_state.llm_key,
+                                st.session_state.llm_provider,
+                                st.session_state.llm_model,
+                                [{"role": "system", "content": sys_msg},
+                                 {"role": "user", "content": user_msg}],
+                                temperature=0.9)
+                            variations = _parse_variations(out)
+                            if not variations:
+                                st.warning("⚠️ Couldn't parse the AI output — "
+                                           "using built-in styles instead.")
+                                variations = _build_template_variations(base)
+                        except Exception as e:
+                            st.error(f"AI variation failed ({e}) — using "
+                                     f"built-in styles.")
+                            variations = _build_template_variations(base)
+                else:
+                    st.caption("💡 Tip: ask the admin to add the free AI key for "
+                               "AI-written variations — using built-in styles "
+                               "for now.")
+                    variations = _build_template_variations(base)
+                if variations:
+                    st.session_state.var_gen = \
+                        st.session_state.get("var_gen", 0) + 1
+                    st.session_state.lst_variations = variations
+                    log_activity(user["name"],
+                                 f"generated {len(variations)} listing variations: "
+                                 f"{base['service']} in {base['city']}")
+
+        vars_ = st.session_state.get("lst_variations") or []
+        if vars_:
+            g = st.session_state.get("var_gen", 0)
+            st.markdown("### 👥 Assign variations to team")
+            team_names = [m.get("name", code)
+                          for code, m in
+                          st.session_state.get("team", {}).items()]
+            for i, v in enumerate(vars_):
+                with st.expander(f"📌 Variation {i+1}: {v['title'][:55]}",
+                                 expanded=(i == 0)):
+                    st.text_input("Title (copy)", value=v["title"],
+                                  key=f"v{g}_title_{i}")
+                    st.text_area("Description (copy)", value=v["desc"],
+                                 height=210, key=f"v{g}_desc_{i}")
+                    st.selectbox("👤 Assign to team member",
+                                 ["— Unassigned —"] + team_names,
+                                 key=f"v{g}_assign_{i}")
+            taken = [st.session_state.get(f"v{g}_assign_{i}",
+                                          "— Unassigned —")
+                     for i in range(len(vars_))]
+            dupes = {t for t in taken
+                     if t != "— Unassigned —" and taken.count(t) > 1}
+            if dupes:
+                st.warning("⚠️ Same member assigned twice: "
+                           + ", ".join(sorted(dupes))
+                           + " — each member should use a DIFFERENT variation!")
+            with st.expander("🛡️ Anti-duplicate tips (avoid FB spam flags)"):
+                st.markdown(
+                    "- 👤 **One variation per person** — never let two members "
+                    "post the same text.\n"
+                    "- ✏️ Change 1–2 words in your own words before posting.\n"
+                    "- 📸 Use **different photos** for each listing.\n"
+                    "- ⏰ Post at **different times** — not all at once.\n"
+                    "- 📍 Vary the map pin slightly inside the city.\n"
+                    "- 🚫 Never copy-paste the exact same title twice."
+                )
 
 
 # ----------------------------------------------------------------------------
@@ -2116,6 +2330,143 @@ elif page == "📋 Surveys":
             st.markdown(f"**{s['title']}**")
             st.caption(s["desc"])
             st.link_button("▶ Start Survey", s["url"])
+
+
+elif page == "🛡️ Safety Toolkit":
+    st.subheader("🛡️ Safety Toolkit")
+    st.write("Keep your accounts safe — check your IP, manage Chrome profiles, "
+             "and understand proxies honestly.")
+    log_activity(user["name"], "opened Safety Toolkit")
+
+    tab1, tab2, tab3 = st.tabs(
+        ["🌐 IP Detector", "👤 Chrome Profiles", "🔌 Proxy Guide"])
+
+    # ---------------- 1. IP Detector ----------------
+    with tab1:
+        st.markdown("### 🌐 IP Detector")
+        st.caption("Check what country your internet connection appears from. "
+                   "Free — no key needed (ipify + ip-api).")
+        if st.button("🔍 Check My IP", type="primary"):
+            with st.spinner("Checking..."):
+                ip_data = _get_json("https://api.ipify.org?format=json")
+                if ip_data and ip_data.get("ip"):
+                    ip = ip_data["ip"]
+                    info = _get_json(f"http://ip-api.com/json/{ip}"
+                                     "?fields=status,country,countryCode,city,isp,query")
+                    st.markdown(f"**Your IP:** `{ip}`")
+                    if info and info.get("status") == "success":
+                        country = info.get("country", "?")
+                        cc = (info.get("countryCode") or "").upper()
+                        city = info.get("city", "?")
+                        isp = info.get("isp", "?")
+                        st.markdown(f"**Country:** {country} ({cc})")
+                        st.markdown(f"**City:** {city}")
+                        st.markdown(f"**ISP:** {isp}")
+                        if cc == "US":
+                            st.success("🇺🇸 **USA IP detected** — good for "
+                                       "USA-targeted accounts!")
+                        else:
+                            st.error(f"⚠️ **NOT USA** — your IP shows "
+                                     f"{country}. USA accounts work best when "
+                                     "the IP matches the account country.")
+                    else:
+                        st.warning("Could not get location details — "
+                                   "showing IP only.")
+                else:
+                    st.error("Could not detect IP. Check your connection and "
+                             "try again.")
+        st.info("💡 **Tip:** FB accounts work best when your IP country matches "
+                "the account's country. If you travel or use a VPN, check here "
+                "first.")
+
+    # ---------------- 2. Chrome Profile Manager ----------------
+    with tab2:
+        st.markdown("### 👤 Chrome Profile Manager")
+        st.caption("One Chrome profile per FB account = accounts stay separate "
+                   "and safer. No mixing cookies/sessions.")
+        with st.expander("📖 How to create a Chrome profile (step by step)",
+                         expanded=False):
+            st.markdown(
+                "1. Open Chrome → click your **profile icon** (top-right)\n"
+                "2. Click **Add** / **Add another account**\n"
+                "3. Click **Continue without an account**\n"
+                "4. Name it clearly, e.g. `FB-Account-1`, pick a color\n"
+                "5. Click **Done** — a new Chrome window opens for this profile\n"
+                "6. **Log in to ONE FB account only** in this profile\n"
+                "7. Repeat for each FB account — never mix accounts in one profile\n\n"
+                "**Rules:**\n"
+                "- 🔒 One profile = one FB account. Never log two accounts in "
+                "the same profile.\n"
+                "- 🚫 Don't switch accounts rapidly inside one profile.\n"
+                "- 💤 Let new profiles 'warm up' — normal browsing a few days "
+                "before heavy posting."
+            )
+        st.markdown("#### 📋 Profile ↔ Account Tracker")
+        if "chrome_profiles" not in st.session_state:
+            st.session_state.chrome_profiles = []
+        with st.form("add_chrome_profile", clear_on_submit=True):
+            c1, c2 = st.columns(2)
+            member = c1.text_input("Team member name")
+            profile = c2.text_input("Chrome profile name", placeholder="FB-Account-1")
+            c3, c4 = st.columns(2)
+            fb_acc = c3.text_input("FB account (email)", placeholder="masked in list")
+            notes = c4.text_input("Notes (optional)")
+            if st.form_submit_button("➕ Add mapping"):
+                if member.strip() and profile.strip():
+                    st.session_state.chrome_profiles.append({
+                        "member": member.strip(),
+                        "profile": profile.strip(),
+                        "fb": _mask_email(fb_acc.strip()) if fb_acc.strip() else "—",
+                        "notes": notes.strip(),
+                    })
+                    log_activity(user["name"],
+                                 f"mapped Chrome profile '{profile.strip()}'")
+                    st.success("Mapping added!")
+                    st.rerun()
+                else:
+                    st.warning("Member name and profile name are required.")
+        rows = st.session_state.chrome_profiles
+        if rows:
+            st.dataframe(rows, use_container_width=True, hide_index=True)
+        else:
+            st.caption("No mappings yet — add your first one above.")
+
+    # ---------------- 3. Proxy Guide (honest) ----------------
+    with tab3:
+        st.markdown("### 🔌 Proxy Guide")
+        st.warning("⚠️ **Honest truth:** No reliable FREE USA proxy exists. "
+                   "Free proxies are slow, die within hours, are usually "
+                   "already blocked by Facebook, and can steal your passwords "
+                   "and data. Never enter real account passwords through a "
+                   "free proxy you don't trust.")
+        with st.expander("🔧 How to enter a proxy in Chrome (step by step)",
+                         expanded=False):
+            st.markdown(
+                "1. Open the Chrome profile for that account\n"
+                "2. Go to **Settings → System → Open your computer's proxy "
+                "settings** (Windows) or **Network → Proxies** (Mac)\n"
+                "3. Enable **Manual proxy setup**\n"
+                "4. Enter the proxy **IP/hostname** and **port**\n"
+                "5. If it needs a username/password, Chrome will ask on first "
+                "use\n"
+                "6. Re-check the **🌐 IP Detector** tab — it should show the "
+                "proxy's country, not yours"
+            )
+        st.markdown("#### Proxy types — what to know")
+        st.markdown(
+            "- 🟢 **Residential (paid)** — real home IPs, best for accounts. "
+            "Costs money ($5–15/GB typically). USA residential = what serious "
+            "teams use.\n"
+            "- 🟡 **Datacenter (cheap)** — server IPs. Cheap but Facebook "
+            "spots them fast → higher ban risk.\n"
+            "- 🔴 **Free lists** — slow, unreliable, often already blacklisted, "
+            "and a real **security risk** (traffic can be spied on). "
+            "**Not recommended for any account you care about.**"
+        )
+        st.info("💡 **Bottom line:** If you buy, buy **USA residential** "
+                "proxies only, from a reputable provider. One proxy per "
+                "account. There is no safe free option — anyone promising "
+                "one is not telling the truth.")
 
 
 # ----------------------------------------------------------------------------
