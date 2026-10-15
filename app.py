@@ -505,6 +505,133 @@ def safety_check(text: str) -> str | None:
     return None
 
 
+# ----------------------------------------------------------------------------
+# 🔍 Spam Score Checker — keep listings natural, avoid FB spam flags.
+# Score starts at 100; penalties lower it. Higher = more natural.
+# ----------------------------------------------------------------------------
+_SPAM_TRIGGER_PHRASES = [
+    "FREE!!!", "ACT NOW", "CLICK HERE", "GUARANTEED", "NO RISK",
+    "LIMITED TIME", "BUY NOW", "100% FREE", "RISK FREE", "MAKE MONEY FAST",
+    "DOUBLE YOUR", "CASH BONUS",
+]
+_SPAM_LEGIT_CAPS = {"USA", "TX", "FL", "CA", "GA", "AZ", "HVAC", "AC"}
+_EMOJI_RE = r"[\U0001F000-\U0001FAFF\u2600-\u27BF\u2B00-\u2BFF\uFE0F]"
+
+
+def spam_score(title: str, desc: str) -> tuple:
+    """Score a listing 0-100 (higher = more natural). Returns (score, issues)."""
+    text = f"{title or ''}\n{desc or ''}"
+    score = 100
+    issues = []
+
+    # ALL CAPS words (3+ letters), excluding legit abbreviations
+    caps_words = re.findall(r"\b[A-Z]{3,}\b", text)
+    caps_bad = sorted({w for w in caps_words if w not in _SPAM_LEGIT_CAPS})
+    if caps_bad:
+        penalty = min(30, 10 * len(caps_bad))
+        score -= penalty
+        shown = ", ".join(caps_bad[:5])
+        issues.append(f"🔠 ALL-CAPS words ({len(caps_bad)}): {shown} (-{penalty})")
+
+    # All-caps title
+    if title and len(title.strip()) > 10 and title.strip() == title.strip().upper():
+        # Make sure it's not just emojis/symbols
+        if re.search(r"[A-Z]{3,}", title):
+            score -= 20
+            issues.append("🔠 Title is ALL CAPS (-20)")
+
+    # Excessive emojis (>5)
+    emoji_count = len(re.findall(_EMOJI_RE, text))
+    if emoji_count > 5:
+        penalty = 5 * (emoji_count - 5)
+        score -= penalty
+        issues.append(f"😀 Too many emojis ({emoji_count}; 5 max suggested) "
+                      f"(-{penalty})")
+
+    # Multiple exclamation marks
+    if re.search(r"!{2,}", text):
+        score -= 10
+        issues.append("❗ Multiple exclamation marks (!!!) (-10)")
+
+    # Spam trigger phrases
+    upper_text = text.upper()
+    for phrase in _SPAM_TRIGGER_PHRASES:
+        if phrase in upper_text:
+            score -= 15
+            issues.append(f"🚨 Spam phrase: \"{phrase}\" (-15)")
+
+    # Too many dollar signs (>2)
+    dollar_count = text.count("$")
+    if dollar_count > 2:
+        penalty = 5 * (dollar_count - 2)
+        score -= penalty
+        issues.append(f"💲 Too many $ signs ({dollar_count}) (-{penalty})")
+
+    return max(0, score), issues
+
+
+def autofix_spam(title: str, desc: str) -> tuple:
+    """Remove excessive caps/emojis/exclamations. Returns (title, desc)."""
+    def _fix(t):
+        t = t or ""
+        # !!! → !
+        t = re.sub(r"!{2,}", "!", t)
+        # Keep max 5 emojis
+        count = [0]
+
+        def _repl(m):
+            count[0] += 1
+            return m.group(0) if count[0] <= 5 else ""
+
+        t = re.sub(_EMOJI_RE, _repl, t)
+        # ALL CAPS words → Capitalized (except legit abbreviations)
+        def _capfix(m):
+            w = m.group(0)
+            return w if w in _SPAM_LEGIT_CAPS else w.capitalize()
+
+        t = re.sub(r"\b[A-Z]{3,}\b", _capfix, t)
+        return t
+
+    return _fix(title), _fix(desc)
+
+
+def show_spam_score(title: str, desc: str, key_prefix: str):
+    """Render the spam-score widget with an auto-fix button.
+
+    Works inside any listing display block. The fixed version is stored in
+    session state so it survives reruns.
+    """
+    score, issues = spam_score(title, desc)
+    if score >= 90:
+        st.success(f"🔍 Spam Score: **{score}/100** — ✅ Excellent, natural!")
+    elif score >= 70:
+        st.warning(f"🔍 Spam Score: **{score}/100** — ⚠️ Good, minor tweaks "
+                   f"suggested:")
+        for issue in issues:
+            st.caption(f"  • {issue}")
+    else:
+        st.error(f"🔍 Spam Score: **{score}/100** — ❌ Risky, rewrite suggested:")
+        for issue in issues:
+            st.caption(f"  • {issue}")
+
+    if st.button("✨ Auto-fix spam issues", key=f"{key_prefix}_autofix"):
+        new_title, new_desc = autofix_spam(title, desc)
+        st.session_state[f"{key_prefix}_fixed_title"] = new_title
+        st.session_state[f"{key_prefix}_fixed_desc"] = new_desc
+        log_activity("system", f"spam auto-fix applied ({key_prefix})")
+
+    fixed_t = st.session_state.get(f"{key_prefix}_fixed_title")
+    fixed_d = st.session_state.get(f"{key_prefix}_fixed_desc")
+    if fixed_t is not None:
+        st.markdown("### ✨ Auto-fixed version")
+        st.text_input("Fixed title (copy)", value=fixed_t,
+                      key=f"{key_prefix}_ft")
+        st.text_area("Fixed description (copy)", value=fixed_d, height=200,
+                     key=f"{key_prefix}_fd")
+        new_score, _ = spam_score(fixed_t, fixed_d)
+        st.info(f"🔍 New spam score: **{new_score}/100**")
+
+
 def llm_complete(api_key: str, provider: str, model: str,
                  messages: list, temperature: float = 0.7) -> str:
     """Single non-streaming completion via Groq or Gemini (free tiers)."""
@@ -1600,14 +1727,32 @@ elif page == "📝 Listing Generator":
                 f"🌐 {SITE_URL}\n\n"
                 f"USA Trade Confessions — trusted home services across the USA!"
             )
-            st.markdown("### 📋 Your listing")
-            st.text_input("Title (copy)", value=title, key="lst_title")
-            st.text_area("Description (copy)", value=desc, height=260,
-                         key="lst_desc")
-            st.success("✅ Copy the title + description and post on "
-                       "Facebook Marketplace manually.")
-            st.caption("⚠️ Always post manually — automated posting gets "
-                       "blocked by Facebook.")
+            # Store generated text in session state so the display block below
+            # (and the spam auto-fix) survives reruns.
+            st.session_state.lst_gen_title = title
+            st.session_state.lst_gen_desc = desc
+            for _k in ("lst_title", "lst_desc",
+                       "lst_fixed_title", "lst_fixed_desc"):
+                st.session_state.pop(_k, None)
+
+    # Display the generated listing from session state (outside the button
+    # block so the spam auto-fix button works across reruns).
+    if st.session_state.get("lst_gen_title"):
+        _gen_title = st.session_state.lst_gen_title
+        _gen_desc = st.session_state.lst_gen_desc
+        st.markdown("### 📋 Your listing")
+        st.text_input("Title (copy)", value=_gen_title, key="lst_title")
+        st.text_area("Description (copy)", value=_gen_desc, height=260,
+                     key="lst_desc")
+        # Spam score on the current widget values (user may have edited).
+        show_spam_score(
+            st.session_state.get("lst_title", _gen_title),
+            st.session_state.get("lst_desc", _gen_desc),
+            "lst")
+        st.success("✅ Copy the title + description and post on "
+                   "Facebook Marketplace manually.")
+        st.caption("⚠️ Always post manually — automated posting gets "
+                   "blocked by Facebook.")
 
     # ------------------------------------------------------------------
     # 🔀 Listing Variation Engine — unique versions per team member so
@@ -1785,6 +1930,11 @@ elif page == "📝 Listing Generator":
                                   key=f"v{g}_title_{i}")
                     st.text_area("Description (copy)", value=v["desc"],
                                  height=210, key=f"v{g}_desc_{i}")
+                    # 🔍 Spam score per variation (on current widget values).
+                    show_spam_score(
+                        st.session_state.get(f"v{g}_title_{i}", v["title"]),
+                        st.session_state.get(f"v{g}_desc_{i}", v["desc"]),
+                        f"v{g}var{i}")
                     st.selectbox("👤 Assign to team member",
                                  ["— Unassigned —"] + team_names,
                                  key=f"v{g}_assign_{i}")
@@ -1807,6 +1957,286 @@ elif page == "📝 Listing Generator":
                     "- 📍 Vary the map pin slightly inside the city.\n"
                     "- 🚫 Never copy-paste the exact same title twice."
                 )
+
+    # ------------------------------------------------------------------
+    # 🌐 Multi-Platform Listing Support — Facebook Marketplace, Locanto,
+    # Craigslist, Yelp, Nextdoor. One base listing → formatted per platform.
+    # ------------------------------------------------------------------
+    if st.session_state.get("lst_base"):
+        st.markdown("---")
+        st.subheader("🌐 Multi-Platform Versions")
+        st.caption("Same service, formatted for each platform's style and "
+                   "rules. Pick platforms → generate → copy & post manually.")
+        mp_base = st.session_state.lst_base
+
+        PLATFORMS = {
+            "fb": "📘 Facebook Marketplace",
+            "locanto": "📋 Locanto",
+            "craigslist": "📌 Craigslist",
+            "yelp": "⭐ Yelp",
+            "nextdoor": "🏘️ Nextdoor",
+        }
+
+        mp_sel = st.multiselect(
+            "Select platforms",
+            list(PLATFORMS.values()),
+            default=["📘 Facebook Marketplace"],
+            key="mp_sel")
+        mp_keys = [k for k, v in PLATFORMS.items() if v in mp_sel]
+
+        def _build_platform_versions(b):
+            svc, cty, prc = b["service"], b["city"], b["price"]
+            cond, xtra = b["condition"], b["extra"].strip()
+            fb_xtra = f"✅ {xtra}\n" if xtra else ""
+            plain_xtra = f"- {xtra}\n" if xtra else ""
+            nd_xtra = f"{xtra} " if xtra else ""
+            versions = {}
+            # --- 📘 Facebook Marketplace: short title, price upfront, emojis OK
+            versions["fb"] = (
+                f"{svc} in {cty} — {prc}",
+                f"🔧 {svc} in {cty}, USA! 🇺🇸\n\n"
+                f"✅ Professional service — {prc} flat\n"
+                f"✅ {cond}\n"
+                f"✅ Licensed & insured pros\n"
+                f"✅ Same-day service available\n"
+                f"{fb_xtra}"
+                f"\n📞 Call/Text: {PHONE}\n"
+                f"🌐 {SITE_URL}\n\n"
+                f"USA Trade Confessions — trusted home services across the USA!"
+            )
+            # --- 📋 Locanto: detailed, category hint, JPG/PNG note
+            versions["locanto"] = (
+                f"{svc} in {cty} | Professional Home Services — {prc}",
+                f"{svc} in {cty}, USA\n\n"
+                f"We provide professional {svc.lower()} services in {cty} "
+                f"and surrounding areas. {cond} work by licensed and insured "
+                f"technicians. Upfront {prc} flat rate — no hidden charges.\n\n"
+                f"Services include:\n"
+                f"- {svc} ({cond.lower()})\n"
+                f"- Same-day appointments available\n"
+                f"- Satisfaction guaranteed\n"
+                f"{plain_xtra}"
+                f"\nCategory: Home Services\n"
+                f"Contact: {PHONE}\n"
+                f"Website: {SITE_URL}\n\n"
+                f"Note: please attach JPG or PNG photos (Locanto does not "
+                f"accept WebP images). Your phone number goes in the "
+                f"dedicated phone field."
+            )
+            # --- 📌 Craigslist: plain text only, no emojis, no ALL CAPS
+            versions["craigslist"] = (
+                f"{svc} - {cty} ({prc} flat)",
+                f"{svc} in {cty}\n\n"
+                f"Professional {svc.lower()} service. {cond} work done by "
+                f"licensed and insured pros. {prc} flat rate, no hidden fees. "
+                f"Same-day service usually available.\n\n"
+                f"- Upfront pricing\n"
+                f"- Licensed and insured\n"
+                f"- Same-day appointments\n"
+                f"{plain_xtra}"
+                f"\nCall or text: {PHONE}\n"
+                f"{SITE_URL}\n\n"
+                f"Serving {cty} and nearby areas."
+            )
+            # --- ⭐ Yelp: business-style, professional, no price in title
+            versions["yelp"] = (
+                f"EasyFix Home Services — {svc} in {cty}",
+                f"EasyFix Home Services proudly serves {cty} with top-rated "
+                f"{svc.lower()}.\n\n"
+                f"About us:\n"
+                f"We are a team of licensed and insured home-service "
+                f"professionals offering {cond.lower()} work with upfront "
+                f"flat-rate pricing and same-day availability.\n\n"
+                f"Our services:\n"
+                f"- {svc}\n"
+                f"- Emergency repairs\n"
+                f"- Installations and maintenance\n"
+                f"{plain_xtra}"
+                f"\nCall {PHONE} or visit {SITE_URL} to book.\n"
+                f"USA Trade Confessions — trusted home services across the USA."
+            )
+            # --- 🏘️ Nextdoor: neighbor tone, local focus
+            versions["nextdoor"] = (
+                f"Hi neighbors! {svc} in {cty} — {prc} flat",
+                f"Hi neighbors!\n\n"
+                f"I'm with EasyFix Home Services, and we help folks right here "
+                f"in {cty} with {svc.lower()}. {cond} work, {prc} flat rate — "
+                f"no surprises, no hidden fees.\n\n"
+                f"Licensed and insured, and we can usually come out same-day. "
+                f"{nd_xtra}Happy to answer any questions!\n\n"
+                f"Call/text: {PHONE}\n"
+                f"{SITE_URL}"
+            )
+            return versions
+
+        if st.button("🌐 Generate Platform Versions", type="primary",
+                     use_container_width=True, key="mp_gen_btn"):
+            blocked = safety_check(mp_base.get("extra", ""))
+            if blocked:
+                log_activity(user["name"],
+                             "blocked: misuse keywords in platform input")
+                st.warning(blocked)
+            elif not mp_keys:
+                st.error("Select at least one platform first.")
+            else:
+                all_v = _build_platform_versions(mp_base)
+                picked = {k: all_v[k] for k in mp_keys}
+                st.session_state.mp_gen = st.session_state.get("mp_gen", 0) + 1
+                st.session_state.mp_versions = picked
+                log_activity(
+                    user["name"],
+                    f"generated multi-platform listing "
+                    f"({', '.join(mp_keys)}): "
+                    f"{mp_base['service']} in {mp_base['city']}")
+
+        mpv = st.session_state.get("mp_versions") or {}
+        if mpv:
+            g = st.session_state.get("mp_gen", 0)
+            mp_tabs = st.tabs([PLATFORMS[k] for k in mpv.keys()])
+            for tab, (k, (t, d)) in zip(mp_tabs, mpv.items()):
+                with tab:
+                    st.text_input("Title (copy)", value=t,
+                                  key=f"mp{g}_{k}_t")
+                    st.text_area("Description (copy)", value=d, height=260,
+                                 key=f"mp{g}_{k}_d")
+                    # 🔍 Spam score per platform version.
+                    show_spam_score(
+                        st.session_state.get(f"mp{g}_{k}_t", t),
+                        st.session_state.get(f"mp{g}_{k}_d", d),
+                        f"mp{g}{k}")
+                    st.caption(f"📌 Post manually on {PLATFORMS[k]} — "
+                               f"never auto-post.")
+
+        with st.expander("📏 Platform tips (limits & best practices)"):
+            st.markdown(
+                "- **📘 Facebook Marketplace** — keep titles under ~100 "
+                "characters; put the price in the dedicated price field AND "
+                "the title; emojis are fine; bright clear photos get more "
+                "clicks; always post manually.\n"
+                "- **📋 Locanto** — category: Home Services; images must be "
+                "JPG/PNG (WebP is rejected); phone goes in the dedicated "
+                "phone field (it gets masked); longer descriptions are OK.\n"
+                "- **📌 Craigslist** — plain text only: no emojis, no ALL "
+                "CAPS; one ad per category; never repost identical ads "
+                "(they get flagged); keep the city in the title.\n"
+                "- **⭐ Yelp** — this is a business listing, not a "
+                "classified: professional tone, services list, no price in "
+                "the title, no keyword stuffing.\n"
+                "- **🏘️ Nextdoor** — real-name community: neighbor-friendly "
+                "tone, local focus, no spammy commercial language or "
+                "neighbors will report it."
+            )
+
+    # --- 🎬 Listing Video Clip: 4–5 sec FB-ready clips ---
+    st.markdown("---")
+    st.subheader("🎬 Listing Video Clip")
+    st.caption("FB Marketplace listings allow video uploads. A short clip "
+               "makes your listing look real — more views, more buyer trust, "
+               "fewer reports.")
+    with st.expander("💡 Why video helps (seedhi baat)"):
+        st.markdown(
+            "- 🎥 **Video wali listings ko zyada views milte hain** — buyers "
+            "stop and watch.\n"
+            "- ✅ **Real lagti hain** — buyer trust karta hai, report kam "
+            "karta hai.\n"
+            "- 📉 **Kam reports = kam ban risk** — legit look matters.\n"
+            "- ⚠️ **Honest note:** video *helps* quality but is NOT a magic "
+            "shield. Combine with VPN + unique variations + smart timing "
+            "for real safety."
+        )
+
+    def _trim_clip(video_bytes: bytes, seconds: int = 5) -> bytes:
+        """Trim to first N seconds, re-encode H.264+AAC faststart (FB-ready)."""
+        import subprocess
+        import imageio_ffmpeg
+        exe = imageio_ffmpeg.get_ffmpeg_exe()
+        tmpdir = tempfile.mkdtemp()
+        vp = f"{tmpdir}/in.mp4"
+        out = f"{tmpdir}/clip.mp4"
+        with open(vp, "wb") as f:
+            f.write(video_bytes)
+        subprocess.run(
+            [exe, "-y", "-v", "error", "-i", vp,
+             "-t", str(seconds),
+             "-c:v", "libx264", "-pix_fmt", "yuv420p",
+             "-preset", "fast", "-c:a", "aac",
+             "-movflags", "+faststart", out],
+            check=True, timeout=180)
+        with open(out, "rb") as f:
+            return f.read()
+
+    clip_presets = {
+        "🚿 Drain Cleaning": "drain cleaning plumber",
+        "🔧 Plumbing Repair": "plumber fixing sink",
+        "🔨 Handyman": "handyman tools repair",
+        "🚪 Garage Door": "garage door repair",
+        "❄️ HVAC": "air conditioner technician",
+        "⚡ Electrical": "electrician wiring",
+        "🏠 Roofing": "roof repair worker",
+        "🎨 Painting": "house painter painting wall",
+    }
+    cp_cols = st.columns(4)
+    for i, (label, q) in enumerate(clip_presets.items()):
+        if cp_cols[i % 4].button(label, use_container_width=True,
+                                 key=f"clipp_{i}"):
+            st.session_state["clip_query"] = q
+    clip_query = st.text_input(
+        "Service for the clip",
+        value=st.session_state.get("clip_query", "plumber"),
+        key="clip_search_box")
+    if st.button("🔍 Find Clips", type="primary", key="clip_search_btn",
+                 use_container_width=True) and clip_query:
+        blocked = safety_check(clip_query)
+        if blocked:
+            log_activity(user["name"],
+                         "blocked: misuse keywords in clip search")
+            st.warning(blocked)
+        elif not PIXABAY_API_KEY:
+            st.error("No Pixabay key configured — ask the admin.")
+        else:
+            with st.spinner("Finding clips…"):
+                try:
+                    st.session_state["clip_results"] = _pixabay_search(
+                        clip_query, PIXABAY_API_KEY, per_page=8)
+                    log_activity(user["name"],
+                                 f"searched listing clips: {clip_query}")
+                except Exception as e:
+                    st.error(f"Search failed: {e}")
+    for r in st.session_state.get("clip_results", []):
+        with st.container(border=True):
+            c1, c2 = st.columns([1, 2])
+            with c1:
+                if r["preview"]:
+                    st.image(r["preview"], use_container_width=True)
+            with c2:
+                st.write(f"⏱️ {r['duration']}s • 📐 "
+                         f"{r['width']}×{r['height']}")
+                if st.button("✂️ Make 5-sec Clip", key=f"clipmk_{r['id']}"):
+                    with st.spinner("Downloading & trimming to 5 sec…"):
+                        try:
+                            req = urllib.request.Request(
+                                r["file"],
+                                headers={"User-Agent": "Mozilla/5.0"})
+                            with urllib.request.urlopen(req,
+                                                         timeout=120) as resp:
+                                data = resp.read()
+                            clip = _trim_clip(data, 5)
+                            st.session_state[f"clipvid_{r['id']}"] = clip
+                            log_activity(
+                                user["name"],
+                                f"made 5-sec listing clip {r['id']} "
+                                f"({len(clip)//1024} KB)")
+                            st.success("✅ 5-second FB-ready clip done!")
+                        except Exception as e:
+                            st.error(f"Clip failed: {e}")
+                cdata = st.session_state.get(f"clipvid_{r['id']}")
+                if cdata:
+                    st.video(cdata)
+                    st.download_button(
+                        "💾 Save Clip (FB-ready MP4)", cdata,
+                        file_name=f"listing_clip_{r['id']}.mp4",
+                        mime="video/mp4",
+                        key=f"clipsv_{r['id']}")
 
 
 # ----------------------------------------------------------------------------
