@@ -761,9 +761,10 @@ ROLES = {
 # 📞 Service numbers (admin-managed) + 📋 Message templates (admin-managed)
 # ----------------------------------------------------------------------------
 DEFAULT_SERVICE_NUMBERS = {
-    # Verified from https://www.easytofix.homes 2026-10-15 — every service
-    # has its own dedicated line. (Plumbing + Garage Door numbers were not
-    # visible on the homepage — they use Default until confirmed.)
+    # Verified from Ringba dashboard (Lead Smart Inc) 2026-10-15 — all 9
+    # live tracking numbers with their campaigns. 6 of 6 match the numbers
+    # on https://www.easytofix.homes; 3 more (Garage Door, Dumpster,
+    # Carpet/Flooring) confirmed from Ringba only.
     "Default": "+18312931196",
     "Plumbing": "+18312931196",
     "Residential Electrical Services": "+18666874517",
@@ -772,6 +773,9 @@ DEFAULT_SERVICE_NUMBERS = {
     "Home HVAC Services": "+18589550579",
     "Home Painting Services": "+13214780719",
     "24/7 Home Emergency Dispatch": "+18312931196",
+    "Garage Door Services": "+13239162354",
+    "Dumpster & Porta Potty Rental": "+16196799844",
+    "Carpet & Flooring Installation": "+13803330948",
 }
 
 DEFAULT_MSG_TEMPLATES = {
