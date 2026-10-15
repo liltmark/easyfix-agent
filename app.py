@@ -1012,6 +1012,13 @@ st.set_page_config(
 st.markdown(
     """
     <style>
+    /* Hide Streamlit chrome: hamburger menu, Manage app button, footer */
+    #MainMenu {visibility: hidden;}
+    footer {visibility: hidden;}
+    header {visibility: hidden;}
+    .stApp > header {display: none;}
+    [data-testid="stToolbar"] {display: none;}
+    [data-testid="manage-app-button"] {display: none;}
     .stApp {
         background: linear-gradient(135deg, #0a0e27 0%, #141238 35%, #1e1045 60%, #0d1030 100%);
         background-attachment: fixed;
