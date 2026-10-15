@@ -69,8 +69,19 @@ SURVEY_LINKS = [
     {"title": "Register for ShopBack Now!", "url": "https://singingfiles.com/show.php?l=0&u=2558676&id=75420", "desc": "Cashback rewards signup (Desktop, USA)."},
 ]
 
-# Admin password — Mudasir can change this in the Admin panel
-DEFAULT_ADMIN_PASSWORD = "easyfix123"
+# Admin password — NEVER hardcode it here (this repo is public).
+# Set it in the Streamlit dashboard: App settings → Secrets →
+#   ADMIN_PASSWORD = "your-secret-password"
+# then reboot the app. The in-app "Change admin password" tab only
+# changes it for the current browser session.
+def _load_admin_password():
+    try:
+        pw = st.secrets.get("ADMIN_PASSWORD", "")
+    except Exception:
+        pw = ""
+    return (pw or "").strip() or None
+
+DEFAULT_ADMIN_PASSWORD = _load_admin_password()
 
 # Branding
 OWNER_NAME = "Muhammad Mudassir Yaseen"
@@ -1193,9 +1204,11 @@ def show_login():
     tab1, tab2 = st.tabs(["👑 Admin", "👥 Team Member"])
 
     with tab1:
+        if not st.session_state.get("admin_password"):
+            st.warning("⚠️ Admin password not configured. Set `ADMIN_PASSWORD` in the Streamlit dashboard → App settings → Secrets, then reboot the app.")
         pw = st.text_input("Admin password", type="password", key="admin_pw")
         if st.button("Sign in as Admin", type="primary", key="admin_login"):
-            if pw == st.session_state.admin_password:
+            if st.session_state.get("admin_password") and pw == st.session_state.admin_password:
                 st.session_state.logged_in = True
                 st.session_state.user = {"name": "Mudasir (Admin)",
                                          "is_admin": True, "roles": ["all"]}
@@ -1498,12 +1511,13 @@ if page == "👑 Admin Panel":
 
     with tab6:
         st.markdown("### Change admin password")
-        npw = st.text_input("New password", type="password", key="npw")
+        st.info("🔐 The real admin password is the `ADMIN_PASSWORD` secret (Streamlit dashboard → App settings → Secrets) — change it there so it survives restarts. The box below changes it for this session only.")
+        npw = st.text_input("New password (this session only)", type="password", key="npw")
         if st.button("💾 Update password", type="primary"):
             if len(npw) >= 6:
                 st.session_state.admin_password = npw
                 log_activity("Admin", "changed password")
-                st.success("✅ Password updated")
+                st.success("✅ Password updated for this session")
             else:
                 st.error("Minimum 6 characters")
 
