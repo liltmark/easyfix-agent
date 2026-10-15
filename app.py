@@ -3451,7 +3451,7 @@ elif page == "🔗 Tools Hub":
          "https://www.easytofix.homes"),
         ("💬 EasyFix Chatbot",
          "AI customer-service chatbot for the website.",
-         "https://udify.app/chat/Rd2QGqnWBPY9LZrq"),
+         "https://udify.app/chatbot/Rd2QGqnWBPY9LZrq"),
     ]
     for title, desc, url in TOOLS:
         with st.container(border=True):
