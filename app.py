@@ -1009,6 +1009,18 @@ def _get_json(url: str, timeout: int = 8):
         return None
 
 
+@st.cache_data(show_spinner=False)
+def _load_video_library():
+    """Load the bundled 2000+ stock video library (video_library.json)."""
+    try:
+        _here = os.path.dirname(os.path.abspath(__file__))
+        with open(os.path.join(_here, "video_library.json"),
+                  encoding="utf-8") as f:
+            return json.load(f)
+    except Exception:
+        return []
+
+
 def log_activity(who: str, action: str):
     st.session_state.activity.append({
         "time": time.strftime("%Y-%m-%d %H:%M"),
@@ -1477,6 +1489,7 @@ if can_access("videos"):
     PAGES += ["🎬 Video Studio", "🎙️ Voiceover Studio"]
 if can_access("listings"):
     PAGES.append("📝 Listing Generator")
+    PAGES.append("🎬 Video Library")
 if can_access("replies"):
     PAGES.append("💬 Reply Assistant")
 PAGES.append("🤖 Chatbot")
@@ -1918,6 +1931,64 @@ elif page == "🎙️ Voiceover Studio":
 
 # ----------------------------------------------------------------------------
 # 📝 FB Listing Generator
+# ----------------------------------------------------------------------------
+# ----------------------------------------------------------------------------
+# 🎬 Video Library — 2000+ bundled stock videos, browsable by the team.
+# ----------------------------------------------------------------------------
+elif page == "🎬 Video Library":
+    st.subheader("🎬 Video Library")
+    st.caption("2000+ ready stock videos for listings — pick by category, "
+               "preview, then copy the link. No searching needed.")
+
+    _lib = _load_video_library()
+    if not _lib:
+        st.warning("⚠️ Video library not loaded yet — ask Mudasir.")
+    else:
+        _cats = sorted({v.get("category", "Other") for v in _lib})
+        f1, f2 = st.columns([1, 2])
+        with f1:
+            _cat = st.selectbox("Category", ["All"] + _cats, key="vlib_cat")
+        with f2:
+            _q = st.text_input("Search", placeholder="e.g. drain, wires…",
+                               key="vlib_q").strip().lower()
+
+        _filtered = [v for v in _lib
+                     if (_cat == "All" or v.get("category") == _cat)
+                     and (not _q or _q in (v.get("tags", "") + " " +
+                                           v.get("query", "")).lower())]
+        st.caption(f"📦 {_filtered:,} videos"
+                   + (f" in **{_cat}**" if _cat != "All" else ""))
+
+        _per = 24
+        _pages = max(1, (len(_filtered) + _per - 1) // _per)
+        _pg = st.number_input("Page", min_value=1, max_value=_pages, value=1,
+                             key="vlib_page")
+        _chunk = _filtered[(_pg - 1) * _per:_pg * _per]
+
+        for _i in range(0, len(_chunk), 3):
+            _cols = st.columns(3)
+            for _j, _v in enumerate(_chunk[_i:_i + 3]):
+                with _cols[_j]:
+                    with st.container(border=True):
+                        _dur = _v.get("duration", 0)
+                        st.markdown(f"**{_v.get('category', '')}** · "
+                                    f"{_dur}s")
+                        st.caption((_v.get("tags", "")[:70] + "…")
+                                   if len(_v.get("tags", "")) > 70
+                                   else _v.get("tags", ""))
+                        if _v.get("video_url"):
+                            st.video(_v["video_url"])
+                        c1, c2 = st.columns(2)
+                        with c1:
+                            if _v.get("video_url"):
+                                st.link_button("⬇️ Open", _v["video_url"])
+                        with c2:
+                            if _v.get("page_url"):
+                                st.link_button("🔗 Page", _v["page_url"])
+
+
+# ----------------------------------------------------------------------------
+# 📝 Listing Generator
 # ----------------------------------------------------------------------------
 elif page == "📝 Listing Generator":
     st.subheader("📝 FB Marketplace Listing Generator")
