@@ -32,7 +32,7 @@ free alternative or clearly labeled "needs free signup, no payment".
 
 ## Team system
 
-- **Admin** (Mudasir): password `easyfix123` (change it in Admin Panel → Settings)
+- **Admin** (Mudasir): set your password in the Streamlit dashboard → App settings → **Secrets** as `ADMIN_PASSWORD` (never commit a password to this repo)
 - **Team members**: admin creates them → each gets a unique 6-letter access code + only their assigned modules
 - Team works UNDER the admin — no full access, activity is logged
 
