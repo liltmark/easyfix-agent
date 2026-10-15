@@ -134,10 +134,7 @@ def _ltx_submit(client: Client, kind: str, prompt: str, negative: str,
         seed_ui=0 if rnd else seed,
         randomize_seed=rnd,
         ui_guidance_scale=guidance,
-        ui_steps=30,
-        stg_mode="attention",
-        stg_scale_ui=1.0,
-        enhance_prompt=True,
+        improve_texture_flag=True,
     )
     for dp in drop_params:
         kwargs.pop(dp, None)
