@@ -217,10 +217,18 @@ def _client_timeout():
         return CONNECT_TIMEOUT
 
 
+# Hugging Face token (free account) — multiplies the free GPU quota on ALL
+# video engines. Set as env var on deploy. Get one free at
+# https://huggingface.co/settings/tokens
+HF_TOKEN = __import__("os").environ.get("HF_TOKEN", "").strip()
+
+
 def get_client(space_id: str) -> Client:
     if space_id not in _client_cache:
-        _client_cache[space_id] = Client(
-            space_id, httpx_kwargs={"timeout": _client_timeout()})
+        kwargs = {"httpx_kwargs": {"timeout": _client_timeout()}}
+        if HF_TOKEN:
+            kwargs["hf_token"] = HF_TOKEN
+        _client_cache[space_id] = Client(space_id, **kwargs)
     return _client_cache[space_id]
 
 
