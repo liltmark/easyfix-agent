@@ -406,6 +406,84 @@ def mux_voiceover(video_bytes: bytes, audio_bytes: bytes) -> bytes:
 
 # Pixabay free API key (stock videos — no quota). Set as env var on deploy.
 PIXABAY_API_KEY = __import__("os").environ.get("PIXABAY_API_KEY", "")
+# Pexels free API key (stock videos — no quota). Set as env var on deploy.
+# Note: Pexels paused NEW key issuance 2026-10-10; works if you already have one.
+PEXELS_API_KEY = __import__("os").environ.get("PEXELS_API_KEY", "")
+
+
+def _src_id(prefix, vid):
+    return f"{prefix}_{vid}"
+
+
+def _pexels_search(query: str, api_key: str, per_page: int = 12):
+    """Search Pexels videos. Returns list of dicts (same shape as Pixabay)."""
+    import json as _json
+    import urllib.parse as _up
+    q = _up.quote(query)
+    per_page = max(3, min(80, per_page))
+    url = (f"https://api.pexels.com/videos/search?query={q}"
+           f"&per_page={per_page}&orientation=portrait")
+    req = urllib.request.Request(
+        url, headers={"Authorization": api_key,
+                      "User-Agent": "EasyFixAgent/1.0"})
+    with urllib.request.urlopen(req, timeout=30) as resp:
+        data = _json.loads(resp.read().decode())
+    out = []
+    for v in data.get("videos", []):
+        files = [f for f in (v.get("video_files") or [])
+                 if f.get("link") and "mp4" in str(f.get("file_type", ""))]
+        if not files:
+            files = [f for f in (v.get("video_files") or []) if f.get("link")]
+        if not files:
+            continue
+        best = max(files, key=lambda f: int(f.get("width") or 0))
+        out.append({
+            "id": _src_id("pexels", v.get("id")),
+            "duration": v.get("duration"),
+            "url": v.get("url"),
+            "preview": v.get("image"),
+            "file": best["link"],
+            "width": best.get("width"),
+            "height": best.get("height"),
+            "source": "Pexels",
+        })
+    return out
+
+
+def _stock_search(query: str, per_page: int = 12):
+    """Search all configured stock-video sources. Returns merged list.
+
+    Each result has a 'source' field ('Pixabay'/'Pexels'). Raises RuntimeError
+    if no source is configured.
+    """
+    have = []
+    if PIXABAY_API_KEY:
+        have.append("pixabay")
+    if PEXELS_API_KEY:
+        have.append("pexels")
+    if not have:
+        raise RuntimeError("no stock API keys configured")
+    out = []
+    if "pixabay" in have:
+        try:
+            for r in _pixabay_search(query, PIXABAY_API_KEY,
+                                     per_page=per_page):
+                r["source"] = "Pixabay"
+                out.append(r)
+        except Exception:
+            pass
+    if "pexels" in have:
+        try:
+            for r in _pexels_search(query, PEXELS_API_KEY,
+                                    per_page=per_page):
+                out.append(r)
+        except Exception:
+            pass
+    return out
+
+
+def _stock_keys_configured():
+    return bool(PIXABAY_API_KEY or PEXELS_API_KEY)
 
 
 def _pixabay_search(query: str, api_key: str, per_page: int = 12):
@@ -426,13 +504,14 @@ def _pixabay_search(query: str, api_key: str, per_page: int = 12):
         if not best or not best.get("url"):
             continue
         out.append({
-            "id": v.get("id"),
+            "id": _src_id("pixabay", v.get("id")),
             "duration": v.get("duration"),
             "url": v.get("pageURL"),
             "preview": v.get("previewURL"),
             "file": best["url"],
             "width": best.get("width"),
             "height": best.get("height"),
+            "source": "Pixabay",
         })
     return out
 
@@ -2304,19 +2383,19 @@ elif page == "📝 Listing Generator":
             log_activity(user["name"],
                          "blocked: misuse keywords in clip search")
             st.warning(blocked)
-        elif not PIXABAY_API_KEY:
-            st.error("No Pixabay key configured — ask the admin.")
+        elif not _stock_keys_configured():
+            st.error("No stock video key configured — ask the admin.")
         else:
             with st.spinner("Finding clips…"):
                 try:
-                    st.session_state["clip_results"] = _pixabay_search(
-                        clip_query, PIXABAY_API_KEY, per_page=8)
+                    st.session_state["clip_results"] = _stock_search(
+                        clip_query, per_page=8)
                     log_activity(user["name"],
                                  f"searched listing clips: {clip_query}")
                 except Exception as e:
                     st.error(f"Search failed: {e}")
     # --- Video deduplication: a clip used by one member is never shown ---
-    # --- to another (duplicate Pixabay video = FB ban risk).              ---
+    # --- to another (duplicate stock video = FB ban risk).              ---
     _used_vids = st.session_state.get("used_videos", {})
     _all_clips = st.session_state.get("clip_results", [])
     _fresh_clips = [r for r in _all_clips
@@ -2335,7 +2414,8 @@ elif page == "📝 Listing Generator":
             with c2:
                 if _locked_by_me:
                     st.success("Locked by you")
-                st.write(f"**{r['duration']}s** | {r['width']}x{r['height']}")
+                st.write(f"**{r['duration']}s** | {r['width']}x{r['height']} | "
+                         f"_{r.get('source', '')}_")
                 if st.button("Make 5-sec Clip", key=f"clipmk_{r['id']}"):
                     with st.spinner("Downloading & trimming to 5 sec..."):
                         try:
@@ -3083,10 +3163,10 @@ elif page == "🔗 Tools Hub":
                     "generation quota. Download as much as you need.")
         st.markdown("**How-to:** Type a keyword below → Search → preview → "
                     "download. Use clips as B-roll in your Shorts.")
-        if not PIXABAY_API_KEY:
-            st.warning("⚠️ Admin: set the `PIXABAY_API_KEY` env var on "
+        if not _stock_keys_configured():
+            st.warning("⚠️ Admin: set `PIXABAY_API_KEY` (free at pixabay.com/api/docs) and/or `PEXELS_API_KEY` as env vars on "
                        "Streamlit Cloud (App settings → Secrets) to enable "
-                       "search. Key is free at pixabay.com/api/docs")
+                       "search.")
         px_presets = {
             "🔧 Plumbing": "plumber plumbing repair",
             "⚡ Electrical": "electrician electrical work",
@@ -3103,18 +3183,18 @@ elif page == "🔗 Tools Hub":
                                      key=f"pxp_{i}"):
                 st.session_state["px_query"] = q
         px_query = st.text_input(
-            "Search Pixabay videos",
+            "Search stock videos (Pixabay + Pexels)",
             value=st.session_state.get("px_query", "plumber"),
             key="px_search_box")
-        if st.button("🔍 Search Pixabay", type="primary",
+        if st.button("🔍 Search Videos", type="primary",
                      key="px_search_btn") and px_query:
-            if not PIXABAY_API_KEY:
+            if not _stock_keys_configured():
                 st.error("No API key configured — ask the admin.")
             else:
-                with st.spinner("Searching Pixabay…"):
+                with st.spinner("Searching stock videos…"):
                     try:
-                        st.session_state["px_results"] = _pixabay_search(
-                            px_query, PIXABAY_API_KEY)
+                        st.session_state["px_results"] = _stock_search(
+                            px_query)
                     except Exception as e:
                         st.error(f"Search failed: {e}")
         for r in st.session_state.get("px_results", []):
@@ -3125,7 +3205,7 @@ elif page == "🔗 Tools Hub":
                         st.image(r["preview"], use_container_width=True)
                 with c2:
                     st.write(f"⏱️ {r['duration']}s • 📐 "
-                             f"{r['width']}×{r['height']}")
+                             f"{r['width']}×{r['height']} • _{r.get('source', '')}_")
                     if st.button("⬇️ Download", key=f"pxdl_{r['id']}"):
                         with st.spinner("Downloading…"):
                             try:
