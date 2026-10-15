@@ -428,10 +428,10 @@ def mux_voiceover(video_bytes: bytes, audio_bytes: bytes) -> bytes:
 
 
 # Pixabay free API key (stock videos — no quota). Set as env var on deploy.
-PIXABAY_API_KEY = __import__("os").environ.get("PIXABAY_API_KEY", "")
+PIXABAY_API_KEY = __import__("os").environ.get("PIXABAY_API_KEY", "").strip()
 # Pexels free API key (stock videos — no quota). Set as env var on deploy.
 # Note: Pexels paused NEW key issuance 2026-10-10; works if you already have one.
-PEXELS_API_KEY = __import__("os").environ.get("PEXELS_API_KEY", "")
+PEXELS_API_KEY = __import__("os").environ.get("PEXELS_API_KEY", "").strip()
 
 
 def _src_id(prefix, vid):
