@@ -440,6 +440,58 @@ def _pixabay_search(query: str, api_key: str, per_page: int = 12):
     return out
 
 
+# ----------------------------------------------------------------------------
+# 📊 Ringba call tracking (official Ringba API v2)
+# Secrets needed: RINGBA_ACCOUNT_ID, RINGBA_API_TOKEN
+# ----------------------------------------------------------------------------
+@st.cache_data(ttl=600)
+def _ringba_call_logs(account_id: str, token: str, days: int):
+    """Fetch call logs from Ringba API v2. Returns (rows, error)."""
+    url = f"https://api.ringba.com/v2/{account_id}/CallLogs/Date"
+    payload = json.dumps({
+        "dateRange": {"past": 0, "days": int(days)},
+        "callLog": {"page": 0, "pageSize": 1000,
+                    "sort": "dtStamp", "sortDirection": "desc"},
+    }).encode()
+    req = urllib.request.Request(
+        url, data=payload,
+        headers={"Authorization": f"Bearer {token}",
+                 "Content-Type": "application/json"})
+    try:
+        with urllib.request.urlopen(req, timeout=30) as resp:
+            body = json.loads(resp.read().decode())
+    except Exception as e:
+        return [], f"API error: {e}"
+    items = (((body or {}).get("result") or {}).get("callLog")
+             or {}).get("data") or []
+    rows = []
+    for it in items:
+        cols = it.get("columns") or {}
+        tags = it.get("tags") or []
+        tag_str = "; ".join(
+            f"{t.get('name', '')}:{t.get('value', '')}"
+            for t in tags if isinstance(t, dict))
+        dt = cols.get("dtStamp")
+        try:
+            ts = (datetime.fromtimestamp(int(dt) / 1000)
+                  .strftime("%Y-%m-%d %H:%M") if dt else "—")
+        except Exception:
+            ts = "—"
+        rows.append({
+            "time": ts,
+            "call_id": cols.get("inboundCallId", ""),
+            "dialed": str(cols.get("number", "")),
+            "caller": str(cols.get("inboundPhoneNumber", "")),
+            "seconds": int(cols.get("callLengthInSeconds") or 0),
+            "tags": tag_str,
+        })
+    return rows, ""
+
+
+def _digits(s: str) -> str:
+    return re.sub(r"\D", "", str(s or ""))[-10:]
+
+
 RESOLUTIONS = {
     "Portrait 720×1280 (Shorts)": (720, 1280),
     "Square 512×512": (512, 512),
@@ -1302,6 +1354,8 @@ if can_access("rotation"):
 if can_access("templates"):
     PAGES.append("📋 Message Templates")
 PAGES.append("📞 Call Log")
+if is_admin:
+    PAGES.append("📊 Ringba Calls")
 PAGES += ["🛡️ Safety Toolkit", "🧠 Knowledge Base", "🔗 Tools Hub", "📋 Surveys"]
 
 with st.sidebar:
@@ -2871,6 +2925,110 @@ elif page == "📞 Call Log":
                     for e in _log))
         st.download_button("⬇️ Export CSV", _csv,
                            file_name="call-log.csv", mime="text/csv")
+
+
+# ----------------------------------------------------------------------------
+# 📊 Ringba Calls — live tracking from Ringba API (admin only)
+# ----------------------------------------------------------------------------
+elif page == "📊 Ringba Calls":
+    st.subheader("📊 Ringba Call Tracking")
+    st.caption("Live call data pulled straight from your Ringba account.")
+
+    _rb_acct = st.secrets.get("RINGBA_ACCOUNT_ID", "")
+    _rb_tok = st.secrets.get("RINGBA_API_TOKEN", "")
+    if not _rb_acct or not _rb_tok:
+        st.warning("⚠️ Ringba is not connected yet.")
+        st.markdown(
+            "**Connect karne ke steps (sirf ek dafa):**\n"
+            "1. Apne **Ringba dashboard** mein jao → API access token banao "
+            "(Settings / API section) aur apna **Account ID** note karo.\n"
+            "2. **Streamlit dashboard** → App settings → **Secrets** mein ye "
+            "2 lines add karo:\n"
+            "   `RINGBA_ACCOUNT_ID = \"...\"` aur "
+            "`RINGBA_API_TOKEN = \"...\"`\n"
+            "3. App **reboot** karo — phir ye page live calls dikhayega.\n\n"
+            "🔐 Token sirf Secrets mein rahega — repo ya chat mein nahi.")
+    else:
+        c1, c2 = st.columns([2, 1])
+        with c1:
+            _days = st.selectbox("Time range",
+                                 [("Today", 1), ("Last 7 days", 7),
+                                  ("Last 30 days", 30)],
+                                 format_func=lambda x: x[0])[1]
+        with c2:
+            st.write("")
+            if st.button("🔄 Refresh", use_container_width=True):
+                _ringba_call_logs.clear()
+
+        _rows, _err = _ringba_call_logs(_rb_acct, _rb_tok, _days)
+        if _err:
+            st.error(f"❌ {_err}\n\nAccount ID ya token ghalat ho sakta "
+                     "hai — Secrets check karo.")
+        elif not _rows:
+            st.info("Is range mein koi call nahi mili.")
+        else:
+            _tot_min = sum(r["seconds"] for r in _rows) // 60
+            m1, m2, m3 = st.columns(3)
+            m1.metric("Total calls", len(_rows))
+            m2.metric("Talk minutes", _tot_min)
+            m3.metric("Unique callers",
+                      len({_digits(r["caller"]) for r in _rows}))
+
+            # Map dialed numbers -> service (via known service numbers)
+            _svc_by_digits = {_digits(v): k for k, v in
+                              DEFAULT_SERVICE_NUMBERS.items()}
+            _by_num = {}
+            for r in _rows:
+                _by_num.setdefault(_digits(r["dialed"]),
+                                   {"calls": 0, "sec": 0})
+                _by_num[_digits(r["dialed"])]["calls"] += 1
+                _by_num[_digits(r["dialed"])]["sec"] += r["seconds"]
+
+            if "ringba_member_map" not in st.session_state:
+                st.session_state.ringba_member_map = {}
+            _member_names = ["—"] + sorted(
+                m["name"] for m in st.session_state.team.values())
+
+            st.markdown("### 📞 Per-number totals")
+            _nt_rows = []
+            for _d, _v in sorted(_by_num.items(),
+                                 key=lambda x: -x[1]["calls"]):
+                _svc = _svc_by_digits.get(_d, "Unknown number")
+                _key = f"rb_map_{_d}"
+                _cur = st.session_state.ringba_member_map.get(_d, "—")
+                _sel = st.selectbox(
+                    f"{_d} → member", _member_names,
+                    index=_member_names.index(_cur)
+                    if _cur in _member_names else 0,
+                    key=_key, label_visibility="collapsed")
+                st.session_state.ringba_member_map[_d] = _sel
+                _nt_rows.append({
+                    "Tracking #": _d, "Service": _svc,
+                    "Member": _sel if _sel != "—" else "unassigned",
+                    "Calls": _v["calls"],
+                    "Minutes": _v["sec"] // 60})
+            st.table(_nt_rows)
+            st.caption("ℹ️ Number → member mapping is session-only for "
+                       "now (resets on restart).")
+
+            st.markdown("### 📋 Call details")
+            st.table([{"Time": r["time"],
+                       "Caller": r["caller"] or "—",
+                       "Dialed": _digits(r["dialed"]) or "—",
+                       "Duration": (f"{r['seconds'] // 60}m "
+                                    f"{r['seconds'] % 60}s"
+                                    if r["seconds"] else "0s"),
+                       "Tags": r["tags"] or "—"}
+                      for r in _rows[:200]])
+
+            _csv = ("time,caller,dialed,seconds,tags\n" + "\n".join(
+                ",".join(f'"{r.get(k, "")}"'
+                         for k in ("time", "caller", "dialed",
+                                   "seconds", "tags"))
+                for r in _rows))
+            st.download_button("⬇️ Export CSV", _csv,
+                               file_name="ringba-calls.csv",
+                               mime="text/csv")
 
 
 # ----------------------------------------------------------------------------
