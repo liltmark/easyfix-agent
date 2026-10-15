@@ -455,7 +455,7 @@ def _ringba_call_logs(account_id: str, token: str, days: int):
     }).encode()
     req = urllib.request.Request(
         url, data=payload,
-        headers={"Authorization": f"Bearer {token}",
+        headers={"Authorization": f"Token {token}",
                  "Content-Type": "application/json"})
     try:
         with urllib.request.urlopen(req, timeout=30) as resp:
