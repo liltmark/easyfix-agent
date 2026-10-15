@@ -1479,6 +1479,7 @@ if can_access("listings"):
     PAGES.append("📝 Listing Generator")
 if can_access("replies"):
     PAGES.append("💬 Reply Assistant")
+PAGES.append("🤖 Chatbot")
 if can_access("accounts"):
     PAGES.append("🔑 Account Vault")
 if can_access("rotation"):
@@ -2689,6 +2690,98 @@ elif page == "💬 Reply Assistant":
                 except Exception as e:
                     st.error(f"❌ AI error: {e}. The free key may be invalid "
                              "or rate-limited.")
+
+
+# ----------------------------------------------------------------------------
+# 🤖 Chatbot — EasyFix customer-service AI, live inside the agent.
+# Uses the same free AI key as Reply Assistant (admin adds it once).
+# ----------------------------------------------------------------------------
+elif page == "🤖 Chatbot":
+    st.subheader("🤖 EasyFix Chatbot")
+    st.caption("Customer-service AI — ask anything a customer would ask "
+               "(price, services, areas, booking). The team can also use it "
+               "to practice replies.")
+
+    if not st.session_state.llm_key:
+        st.warning("⚠️ The admin hasn't added the free AI key yet "
+                   "(free signup, no payment). "
+                   "Ask Mudasir to add it in Admin Panel → API Key.")
+        st.stop()
+
+    if "chatbot_history" not in st.session_state:
+        st.session_state.chatbot_history = [
+            {"role": "assistant",
+             "content": "Salam! 👋 Main EasyFix ka assistant hun. "
+                        "Plumbing, electrical, HVAC — kisi bhi service ke "
+                        "bare mein poochein. $110 flat, koi hidden charges "
+                        "nahi. Kaise madad kar sakta hun?"}]
+
+    for m in st.session_state.chatbot_history:
+        with st.chat_message(m["role"]):
+            st.markdown(m["content"])
+
+    c1, c2 = st.columns([4, 1])
+    with c2:
+        if st.button("🗑️ Clear", use_container_width=True):
+            st.session_state.chatbot_history = \
+                st.session_state.chatbot_history[:1]
+            st.rerun()
+
+    user_q = st.chat_input("Customer ka sawal likhein…")
+    if user_q:
+        blocked = safety_check(user_q)
+        if blocked:
+            st.session_state.chatbot_history.append(
+                {"role": "user", "content": user_q})
+            st.session_state.chatbot_history.append(
+                {"role": "assistant", "content": blocked})
+            log_activity(user["name"], "blocked: misuse keywords in chatbot")
+            st.rerun()
+        st.session_state.chatbot_history.append(
+            {"role": "user", "content": user_q})
+        with st.chat_message("user"):
+            st.markdown(user_q)
+        with st.chat_message("assistant"):
+            with st.spinner("Soch raha hun…"):
+                try:
+                    _hist = st.session_state.chatbot_history[-10:]
+                    _sys = (
+                        "You are the EasyFix customer-service chatbot "
+                        "(https://www.easytofix.homes), owned by Muhammad "
+                        "Mudassir Yaseen. Answer customer questions in "
+                        "NATURAL Roman Urdu mixed with simple English — "
+                        "like a real friendly Pakistani person texting, "
+                        "never a robot. Keep answers short (1-4 sentences) "
+                        "unless the customer asks for detail. "
+                        "Services: Plumbing, Electrical, HVAC, Roofing, "
+                        "Garage Door, Painting, Appliance Repair, Carpet & "
+                        "Flooring, Dumpster & Porta Potty. "
+                        "Price: $110 flat per service visit, no hidden "
+                        "charges. Service areas: Dallas, Chicago, New York, "
+                        "Houston, Miami, Atlanta + nearby. "
+                        "Phone: +18312931196. Website: "
+                        "https://www.easytofix.homes. "
+                        "If they want to book, ask for their city and "
+                        "service, then give the phone number. "
+                        "Never invent prices, addresses, or licenses."
+                    )
+                    _msgs = [{"role": "system", "content": _sys}] + _hist
+                    _ans = llm_complete(
+                        st.session_state.llm_key,
+                        st.session_state.llm_provider,
+                        st.session_state.llm_model,
+                        _msgs, temperature=0.6)
+                    st.markdown(_ans)
+                    st.session_state.chatbot_history.append(
+                        {"role": "assistant", "content": _ans})
+                    log_activity(user["name"], "used chatbot")
+                except Exception as e:
+                    _err = (f"❌ AI error: {e}. Free key rate-limited ya "
+                            f"invalid ho sakti hai — thodi der baad try "
+                            f"karein.")
+                    st.error(_err)
+                    st.session_state.chatbot_history.append(
+                        {"role": "assistant", "content": _err})
 
 
 # ----------------------------------------------------------------------------
