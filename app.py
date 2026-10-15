@@ -223,12 +223,27 @@ def _client_timeout():
 HF_TOKEN = __import__("os").environ.get("HF_TOKEN", "").strip()
 
 
+def _ensure_hf_login():
+    """Ambient HF login so every gradio_client call uses the account quota.
+
+    Works across gradio_client versions (some no longer accept hf_token as
+    a Client kwarg).
+    """
+    if HF_TOKEN:
+        try:
+            from huggingface_hub import login
+            login(token=HF_TOKEN)
+        except Exception:
+            pass
+
+
+_ensure_hf_login()
+
+
 def get_client(space_id: str) -> Client:
     if space_id not in _client_cache:
-        kwargs = {"httpx_kwargs": {"timeout": _client_timeout()}}
-        if HF_TOKEN:
-            kwargs["hf_token"] = HF_TOKEN
-        _client_cache[space_id] = Client(space_id, **kwargs)
+        _client_cache[space_id] = Client(
+            space_id, httpx_kwargs={"timeout": _client_timeout()})
     return _client_cache[space_id]
 
 
