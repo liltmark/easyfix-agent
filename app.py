@@ -775,6 +775,14 @@ def _init_state():
                                           "daily_limit": 3}
     if "last_suggested_acct" not in st.session_state:
         st.session_state.last_suggested_acct = None
+    if "used_videos" not in st.session_state:
+        # Listing-video deduplication registry:
+        # video_id(str) -> {"used_by": member name,
+        #                  "used_at": "YYYY-MM-DD HH:MM",
+        #                  "thumbnail": preview URL, "query": search term}
+        # A video marked here is hidden from other members' searches so the
+        # team never reuses the same Pixabay clip (duplicate = FB ban risk).
+        st.session_state.used_videos = {}
     # Migrate any existing vault entries to smart-account fields (idempotent)
     for _accts in st.session_state.account_vault.values():
         for _e in _accts:
@@ -2202,17 +2210,29 @@ elif page == "📝 Listing Generator":
                                  f"searched listing clips: {clip_query}")
                 except Exception as e:
                     st.error(f"Search failed: {e}")
-    for r in st.session_state.get("clip_results", []):
+    # --- Video deduplication: a clip used by one member is never shown ---
+    # --- to another (duplicate Pixabay video = FB ban risk).              ---
+    _used_vids = st.session_state.get("used_videos", {})
+    _all_clips = st.session_state.get("clip_results", [])
+    _fresh_clips = [r for r in _all_clips
+                    if str(r["id"]) not in _used_vids]
+    _used_clips = [r for r in _all_clips
+                   if str(r["id"]) in _used_vids]
+
+    def _clip_card(r, _locked_by_me=False):
+        """Render one video card with trim/download. If _locked_by_me, the
+        current member reserved it and may still make the clip here."""
         with st.container(border=True):
             c1, c2 = st.columns([1, 2])
             with c1:
                 if r["preview"]:
                     st.image(r["preview"], use_container_width=True)
             with c2:
-                st.write(f"⏱️ {r['duration']}s • 📐 "
-                         f"{r['width']}×{r['height']}")
-                if st.button("✂️ Make 5-sec Clip", key=f"clipmk_{r['id']}"):
-                    with st.spinner("Downloading & trimming to 5 sec…"):
+                if _locked_by_me:
+                    st.success("Locked by you")
+                st.write(f"**{r['duration']}s** | {r['width']}x{r['height']}")
+                if st.button("Make 5-sec Clip", key=f"clipmk_{r['id']}"):
+                    with st.spinner("Downloading & trimming to 5 sec..."):
                         try:
                             req = urllib.request.Request(
                                 r["file"],
@@ -2226,17 +2246,117 @@ elif page == "📝 Listing Generator":
                                 user["name"],
                                 f"made 5-sec listing clip {r['id']} "
                                 f"({len(clip)//1024} KB)")
-                            st.success("✅ 5-second FB-ready clip done!")
+                            st.success("5-second FB-ready clip done!")
                         except Exception as e:
                             st.error(f"Clip failed: {e}")
+                if not _locked_by_me and str(r["id"]) not in \
+                        st.session_state.get("used_videos", {}):
+                    if st.button("Use This Video",
+                                 key=f"clipuse_{r['id']}", type="primary"):
+                        st.session_state["used_videos"][str(r["id"])] = {
+                            "used_by": user["name"],
+                            "used_at": time.strftime("%Y-%m-%d %H:%M"),
+                            "thumbnail": r.get("preview", ""),
+                            "query": clip_query,
+                        }
+                        log_activity(user["name"],
+                                     f"locked listing video {r['id']}")
+                        st.success("Video locked for you! No other member "
+                                   "will see it in searches.")
+                        st.rerun()
                 cdata = st.session_state.get(f"clipvid_{r['id']}")
                 if cdata:
                     st.video(cdata)
                     st.download_button(
-                        "💾 Save Clip (FB-ready MP4)", cdata,
+                        "Save Clip (FB-ready MP4)", cdata,
                         file_name=f"listing_clip_{r['id']}.mp4",
                         mime="video/mp4",
                         key=f"clipsv_{r['id']}")
+
+    if _all_clips:
+        if _fresh_clips:
+            st.info(f"Showing {len(_fresh_clips)} fresh videos "
+                    f"({len(_used_clips)} already used by the team)")
+        else:
+            st.warning("Every video in this search is already used by "
+                       "the team! Try a different search term, or browse "
+                       "the used list below.")
+    for r in _fresh_clips:
+        _clip_card(r)
+    if _used_clips:
+        with st.expander(f"Used by team ({len(_used_clips)}) - locked"):
+            for r in _used_clips:
+                _info = _used_vids.get(str(r["id"]), {})
+                _by = _info.get("used_by", "?")
+                _at = _info.get("used_at", "")
+                if _by == user["name"]:
+                    _clip_card(r, _locked_by_me=True)
+                else:
+                    with st.container(border=True):
+                        cc1, cc2 = st.columns([1, 2])
+                        with cc1:
+                            if r["preview"]:
+                                st.image(r["preview"],
+                                         use_container_width=True)
+                        with cc2:
+                            st.write(f"Used by **{_by}**"
+                                     + (f" on {_at}" if _at else ""))
+                            st.caption("Locked - pick a fresh video above.")
+
+    # --- Admin: used-video registry (view / release / export / import) ---
+    if is_admin:
+        _uv = st.session_state.get("used_videos", {})
+        with st.expander(f"Used video registry ({len(_uv)})"):
+            if _uv:
+                _rows = [{"Video ID": vid,
+                          "Used by": v.get("used_by", "?"),
+                          "Used at": v.get("used_at", ""),
+                          "Search": v.get("query", "")}
+                         for vid, v in sorted(
+                             _uv.items(),
+                             key=lambda x: x[1].get("used_at", ""),
+                             reverse=True)]
+                st.dataframe(_rows, use_container_width=True)
+                st.markdown("**Release a video back to the pool:**")
+                for vid, v in list(_uv.items()):
+                    if st.button(
+                            f"Release {vid} "
+                            f"(was: {v.get('used_by', '?')})",
+                            key=f"cliprel_{vid}"):
+                        del st.session_state["used_videos"][vid]
+                        log_activity(user["name"],
+                                     f"released listing video {vid}")
+                        st.success(f"Video {vid} released.")
+                        st.rerun()
+            else:
+                st.info("No videos marked as used yet.")
+            st.markdown("---")
+            st.markdown("**Backup / restore** (Streamlit clears this list "
+                        "on reboot - export it regularly!)")
+            _exp = json.dumps(_uv, indent=2, ensure_ascii=False)
+            st.download_button("Export used list (JSON)", _exp,
+                               file_name="used_videos.json",
+                               mime="application/json",
+                               key="clipexp_json")
+            _up = st.file_uploader("Import used list (JSON)",
+                                    type=["json"], key="clipimp_json")
+            if _up is not None:
+                try:
+                    _imp = json.load(_up)
+                    if isinstance(_imp, dict):
+                        _before = len(st.session_state["used_videos"])
+                        st.session_state["used_videos"].update(_imp)
+                        _after = len(st.session_state["used_videos"])
+                        log_activity(
+                            user["name"],
+                            "imported used-video list "
+                            f"({_after - _before} new)")
+                        st.success(f"Imported! Registry now has "
+                                   f"{_after} videos.")
+                    else:
+                        st.error("Invalid file - expected a JSON object.")
+                except Exception as e:
+                    st.error(f"Import failed: {e}")
 
 
 # ----------------------------------------------------------------------------
@@ -2518,7 +2638,8 @@ elif page == "🔑 Account Vault":
     c1, c2 = st.columns(2)
     with c1:
         platform = st.selectbox("Platform", ["Facebook", "YouTube",
-                                             "Instagram", "Dailymotion", "Rumble"],
+                                             "Instagram", "Dailymotion", "Rumble",
+                                             "Quora", "Pinterest", "Reddit"],
                                 key="vault_platform")
     with c2:
         email = st.text_input("Account email", key="vault_email",
