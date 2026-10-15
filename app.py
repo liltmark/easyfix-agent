@@ -635,6 +635,12 @@ def _init_state():
         #                  "uploads_today": 0, "uploads_date": "YYYY-MM-DD"}]
         # Passwords are NEVER stored — login always happens in the browser.
         st.session_state.account_vault = {}
+    if "nord_logins" not in st.session_state:
+        # Admin's own paid NordVPN logins, distributed to team members:
+        # [{"label": "Nord-1", "username": "...", "password": "...",
+        #   "server_city": "Dallas"}] — max 4. Device counts are computed
+        # dynamically from team member assignments (10 max per login).
+        st.session_state.nord_logins = []
     if "acct_settings" not in st.session_state:
         # Safe scheduling: min hours between uploads on one account,
         # max uploads per account per day.
@@ -1176,6 +1182,19 @@ if page == "👑 Admin Panel":
             m_roles = st.multiselect("Modules allowed", list(ROLES.keys()),
                                      format_func=lambda k: ROLES[k],
                                      key="m_roles")
+        st.markdown("#### 🔒 NordVPN login for this member (optional)")
+        st.caption("Give them a NordVPN login so their IP shows as USA. "
+                   "Manage logins in 🛡️ Safety Toolkit → 🔒 NordVPN Setup.")
+        nc1, nc2 = st.columns(2)
+        _nord_opts = (["None"] +
+                      [l["label"] for l in st.session_state.nord_logins])
+        with nc1:
+            m_nord = st.selectbox("NordVPN login", _nord_opts, key="m_nord",
+                                  help="Which NordVPN login this member uses")
+        with nc2:
+            m_nord_city = st.text_input("USA server city", key="m_nord_city",
+                                        value="Dallas",
+                                        placeholder="e.g. Dallas")
         if st.button("➕ Create member", type="primary"):
             if not m_name.strip():
                 st.error("Enter a name")
@@ -1183,8 +1202,15 @@ if page == "👑 Admin Panel":
                 st.error("Pick at least one module")
             else:
                 code = "".join(random.choices("ABCDEFGHJKLMNPQRSTUVWXYZ23456789", k=6))
-                st.session_state.team[code] = {"name": m_name.strip(),
-                                               "roles": m_roles}
+                _member = {"name": m_name.strip(), "roles": m_roles}
+                if m_nord != "None":
+                    _member["nord"] = {
+                        "login": m_nord,
+                        "server_city": (m_nord_city or "Dallas").strip()}
+                    log_activity(
+                        "Admin",
+                        f"assigned NordVPN login {m_nord} to {m_name.strip()}")
+                st.session_state.team[code] = _member
                 log_activity("Admin", f"created member {m_name} ({code})")
                 st.success(f"✅ **{m_name}** created! Access code: **{code}**")
                 st.info("Share this code with them privately. "
@@ -1200,6 +1226,12 @@ if page == "👑 Admin Panel":
                 with c1:
                     st.markdown(f"**{m['name']}**")
                     st.caption(f"Code: `{code}`")
+                    _mn = m.get("nord")
+                    if _mn:
+                        st.caption(f"🔒 NordVPN: **{_mn['login']}** "
+                                   f"({_mn.get('server_city', 'Dallas')}, USA)")
+                    else:
+                        st.caption("🔒 No NordVPN assigned")
                     accts = st.session_state.account_vault.get(m["name"], [])
                     if accts:
                         st.caption("🔑 " + ", ".join(
@@ -2524,6 +2556,250 @@ elif page == "🛡️ Safety Toolkit":
                 "3. ☐ Correct **Chrome profile** for your account?\\n\\n"
                 "All three green → **start work**. Any red → **fix it first**."
             )
+
+        # ---------------- NordVPN credential distribution ----------------
+        st.markdown("---")
+        if is_admin:
+            st.markdown("### 🔑 NordVPN Logins Manager")
+            st.caption("Your own paid NordVPN logins — given to team members "
+                       "through the agent. Only you can see or change these.")
+            st.warning("⚠️ **10 devices max per NordVPN login** — assign "
+                       "wisely across the team. 🔒 **Never share these logins "
+                       "outside the team.**")
+            _nords = st.session_state.nord_logins
+            if len(_nords) >= 4:
+                st.info("Maximum 4 NordVPN logins stored — delete one to add "
+                        "another.")
+            else:
+                with st.expander("➕ Add NordVPN login", expanded=False):
+                    with st.form("nord_add", clear_on_submit=True):
+                        _nl = st.text_input("Label", placeholder="e.g. Nord-1")
+                        _nu = st.text_input("Username / email")
+                        _np = st.text_input("Password", type="password")
+                        _nc = st.text_input("Default USA server city",
+                                            value="Dallas")
+                        if st.form_submit_button("💾 Save login"):
+                            if not _nl.strip() or not _nu.strip() or not _np:
+                                st.error("Label, username and password are "
+                                         "required")
+                            elif any(l["label"].lower() == _nl.strip().lower()
+                                     for l in _nords):
+                                st.error("A login with this label already "
+                                         "exists")
+                            else:
+                                _nords.append({
+                                    "label": _nl.strip(),
+                                    "username": _nu.strip(),
+                                    "password": _np,
+                                    "server_city": (_nc or "Dallas").strip()})
+                                log_activity(
+                                    "Admin",
+                                    f"added NordVPN login {_nl.strip()}")
+                                st.success(f"✅ **{_nl.strip()}** saved")
+                                st.rerun()
+            for _li, _nl in enumerate(list(_nords)):
+                _label = _nl["label"]
+                _users = [m["name"] for m in st.session_state.team.values()
+                          if m.get("nord", {}).get("login") == _label]
+                _n_used = len(_users)
+                with st.container(border=True):
+                    _h1, _h2 = st.columns([3, 1])
+                    with _h1:
+                        st.markdown(f"**{_label}** — `{_n_used}/10` devices "
+                                    "used")
+                        st.progress(min(1.0, _n_used / 10))
+                        st.caption(f"Server: {_nl.get('server_city', 'Dallas')}, "
+                                   "USA")
+                    with _h2:
+                        _show = st.checkbox("Show", key=f"nord_show_{_li}")
+                    if _show:
+                        st.markdown("**Username:**")
+                        st.code(_nl["username"])
+                        st.markdown("**Password:**")
+                        st.code(_nl["password"])
+                    else:
+                        st.caption(f"👤 {_nl['username'][:3]}••• | 🔑 ••••••••")
+                    if _users:
+                        st.caption("👥 Assigned to: " + ", ".join(_users))
+                    else:
+                        st.caption("👥 Not assigned to anyone yet")
+                    if st.button("🗑️ Delete login", key=f"nord_del_{_li}"):
+                        for _m in st.session_state.team.values():
+                            if _m.get("nord", {}).get("login") == _label:
+                                _m.pop("nord", None)
+                        _nords.pop(_li)
+                        log_activity("Admin",
+                                     f"deleted NordVPN login {_label}")
+                        st.success(f"Deleted **{_label}**")
+                        st.rerun()
+        else:
+            # ---- Team member view: their own VPN login card ----
+            _mem = st.session_state.team.get(user.get("code", ""), {})
+            _mn = _mem.get("nord")
+            st.markdown("### 🔑 Your VPN Login")
+            if not _mn:
+                st.info("No NordVPN login assigned to you yet — ask the admin "
+                        "(Mudasir) to assign one.")
+            else:
+                _login = next(
+                    (l for l in st.session_state.nord_logins
+                     if l["label"] == _mn["login"]), None)
+                if not _login:
+                    st.warning("Your assigned NordVPN login was removed — ask "
+                               "the admin for a new one.")
+                else:
+                    _city = _mn.get("server_city",
+                                    _login.get("server_city", "Dallas"))
+                    with st.container(border=True):
+                        st.markdown(f"### 🔒 {_login['label']}")
+                        st.success(f"🌐 Connect to: **{_city}, USA** 🇺🇸")
+                        st.markdown("**Username** (tap 📋 to copy):")
+                        st.code(_login["username"])
+                        st.markdown("**Password** (tap 📋 to copy):")
+                        st.code(_login["password"])
+                        st.caption(
+                            "1. Open NordVPN on your device → log in with the "
+                            f"above → connect to **{_city}, USA** → then open "
+                            "the 🌐 IP Detector tab here and press "
+                            "**Check My IP**.")
+                        if st.button("✅ I connected — my IP is USA",
+                                     type="primary"):
+                            log_activity(
+                                user["name"],
+                                f"confirmed NordVPN connected ({_city}, USA)")
+                            st.success("✅ Logged! Now verify in the "
+                                       "🌐 IP Detector tab.")
+        st.markdown("---")
+
+        # ---------------- 5. VPN Setup Tracker ----------------
+        st.markdown("---")
+        st.markdown("### 📋 VPN Setup Tracker")
+        st.caption("Admin tracks who has NordVPN installed. Members verify "
+                   "their own IP here before work.")
+        if "vpn_tracker" not in st.session_state:
+            # [{name, device, installed, server_city, last_ip, last_country, last_check}]
+            st.session_state.vpn_tracker = []
+        if "vpn_team_target" not in st.session_state:
+            st.session_state.vpn_team_target = 30
+
+        _vrows = st.session_state.vpn_tracker
+        _secured = sum(1 for _r in _vrows if _r.get("installed"))
+        _target = max(1, int(st.session_state.vpn_team_target))
+        st.markdown(f"#### 📊 VPN Coverage: **{_secured}/{_target}** "
+                    "members secured")
+        st.progress(min(1.0, _secured / _target))
+
+        if is_admin:
+            with st.expander("⚙️ Admin: team size target", expanded=False):
+                _t = st.number_input("Team size target", min_value=1,
+                                     max_value=200, value=_target,
+                                     key="vpn_target_input")
+                if int(_t) != _target:
+                    st.session_state.vpn_team_target = int(_t)
+                    st.rerun()
+            with st.expander("➕ Add / update member", expanded=False):
+                with st.form("vpn_add_member", clear_on_submit=True):
+                    _c1, _c2 = st.columns(2)
+                    _m_name = _c1.text_input("Member name")
+                    _m_device = _c2.selectbox(
+                        "Device", ["Laptop", "Phone", "Laptop + Phone"])
+                    _m_city = _c1.text_input("USA server city", value="Dallas")
+                    _m_inst = _c2.checkbox("VPN installed ✅", value=False)
+                    if st.form_submit_button("💾 Save"):
+                        if not _m_name.strip():
+                            st.error("Enter a name")
+                        else:
+                            _ex = next(
+                                (_r for _r in _vrows
+                                 if _r["name"].lower() == _m_name.strip().lower()),
+                                None)
+                            if _ex:
+                                _ex.update({"device": _m_device,
+                                            "installed": bool(_m_inst),
+                                            "server_city": _m_city.strip() or "Dallas"})
+                                log_activity("Admin",
+                                             f"updated VPN tracker for {_m_name}")
+                                st.success(f"Updated **{_m_name}**")
+                            else:
+                                _vrows.append({
+                                    "name": _m_name.strip(), "device": _m_device,
+                                    "installed": bool(_m_inst),
+                                    "server_city": _m_city.strip() or "Dallas",
+                                    "last_ip": "-", "last_country": "-",
+                                    "last_check": "-"})
+                                log_activity("Admin",
+                                             f"added {_m_name} to VPN tracker")
+                                st.success(f"Added **{_m_name}** to tracker")
+                            st.rerun()
+
+        st.markdown("#### 👥 Tracker")
+        if not _vrows:
+            st.info("No members in the tracker yet — admin adds them above.")
+        else:
+            for _i, _r in enumerate(_vrows):
+                if _r.get("installed") and _r.get("last_country") == "US":
+                    _st = "✅ Secured"
+                elif _r.get("installed"):
+                    _st = "🟡 Installed — not verified"
+                else:
+                    _st = "❌ Not installed"
+                with st.container(border=True):
+                    _cc1, _cc2, _cc3 = st.columns([4, 3, 1])
+                    with _cc1:
+                        st.markdown(f"**{_r['name']}** · {_r['device']} · "
+                                    f"{_r['server_city']}")
+                        st.caption(f"Last check: {_r['last_ip']} · "
+                                   f"{_r['last_country']} · {_r['last_check']}")
+                    with _cc2:
+                        st.markdown(_st)
+                    with _cc3:
+                        if is_admin:
+                            if st.button("🔄", key=f"vpn_toggle_{_i}",
+                                         help="Toggle installed on/off"):
+                                _r["installed"] = not _r["installed"]
+                                log_activity(
+                                    "Admin",
+                                    f"toggled VPN for {_r['name']} -> "
+                                    f"{_r['installed']}")
+                                st.rerun()
+
+        st.markdown("#### 🔍 Verify My IP")
+        st.caption("One click — checks your current IP and country.")
+        if st.button("🔍 Verify My IP", type="primary", key="vpn_verify_ip"):
+            with st.spinner("Checking..."):
+                _ip_data = _get_json("https://api.ipify.org?format=json")
+                _ip = _ip_data.get("ip") if _ip_data else None
+                if not _ip:
+                    st.error("Could not detect IP. Check your connection "
+                             "and try again.")
+                else:
+                    _info = _get_json(
+                        f"http://ip-api.com/json/{_ip}"
+                        "?fields=status,country,countryCode")
+                    _cc = ((_info.get("countryCode") or "").upper()
+                           if _info and _info.get("status") == "success"
+                           else "")
+                    _country = (_info.get("country", "?")
+                                if _info else "?")
+                    st.markdown(f"**Your IP:** `{_ip}` · **Country:** "
+                                f"{_country} ({_cc or '?'})")
+                    if _cc == "US":
+                        st.success("✅ **Secure — kaam shuru karo!** "
+                                   "Your IP is in the USA.")
+                    else:
+                        st.error("⚠️ **VPN on karo phir check karo!** "
+                                 "Your IP is NOT in the USA.")
+                    _me = next(
+                        (_r for _r in _vrows
+                         if _r["name"].lower() == user["name"].lower()),
+                        None)
+                    if _me:
+                        _me.update({
+                            "last_ip": _ip,
+                            "last_country": _cc or _country,
+                            "last_check": time.strftime("%Y-%m-%d %H:%M")})
+                        log_activity(user["name"],
+                                     f"verified IP {_ip} ({_country})")
 
 
 # ----------------------------------------------------------------------------
