@@ -26,6 +26,7 @@ import tempfile
 import time
 import traceback
 import urllib.request
+from datetime import datetime
 
 import streamlit as st
 import streamlit.components.v1 as components
@@ -708,8 +709,17 @@ ROLES = {
 # 📞 Service numbers (admin-managed) + 📋 Message templates (admin-managed)
 # ----------------------------------------------------------------------------
 DEFAULT_SERVICE_NUMBERS = {
+    # Verified from https://www.easytofix.homes 2026-10-15 — every service
+    # has its own dedicated line. (Plumbing + Garage Door numbers were not
+    # visible on the homepage — they use Default until confirmed.)
     "Default": "+18312931196",
     "Plumbing": "+18312931196",
+    "Residential Electrical Services": "+18666874517",
+    "Residential Roofing Services": "+18664923583",
+    "Home Appliance Repair": "+13238311502",
+    "Home HVAC Services": "+18589550579",
+    "Home Painting Services": "+13214780719",
+    "24/7 Home Emergency Dispatch": "+18312931196",
 }
 
 DEFAULT_MSG_TEMPLATES = {
@@ -782,6 +792,11 @@ def _init_state():
         st.session_state.videos_made = 0
     if "service_numbers" not in st.session_state:
         st.session_state.service_numbers = dict(DEFAULT_SERVICE_NUMBERS)
+    if "call_log" not in st.session_state:
+        # Per-member call tracking.
+        # [{ts, member, member_code, service, caller, duration_min, outcome, notes}]
+        # NOTE: session-only — resets on app restart. Export CSV regularly.
+        st.session_state.call_log = []
     if "msg_templates" not in st.session_state:
         st.session_state.msg_templates = dict(DEFAULT_MSG_TEMPLATES)
     if "account_vault" not in st.session_state:
@@ -1286,6 +1301,7 @@ if can_access("rotation"):
     PAGES.append("🔄 Smart Account Manager")
 if can_access("templates"):
     PAGES.append("📋 Message Templates")
+PAGES.append("📞 Call Log")
 PAGES += ["🛡️ Safety Toolkit", "🧠 Knowledge Base", "🔗 Tools Hub", "📋 Surveys"]
 
 with st.sidebar:
@@ -2748,6 +2764,113 @@ elif page == "📋 Message Templates":
         st.markdown("### 📝 Ready message")
         st.text_area("Copy this", value=filled, height=130, key="tpl_out")
         st.caption("Tap the text → copy → paste into Messenger/WhatsApp/FB.")
+
+
+# ----------------------------------------------------------------------------
+# 📞 Call Log — per-member call tracking
+# ----------------------------------------------------------------------------
+elif page == "📞 Call Log":
+    st.subheader("📞 Call Log")
+    st.caption("Log every incoming call here — per-member totals for the admin.")
+    st.warning("⚠️ Call history resets if the app restarts — export CSV daily. "
+               "A persistent backend is the next step.")
+
+    _svc_list = list(st.session_state.service_numbers.keys())
+    _outcomes = ["Booked ✅", "Qualified", "Callback needed",
+                 "No answer", "Spam", "Wrong number"]
+
+    with st.expander("➕ Log a call", expanded=not is_admin):
+        with st.form("call_log_form", clear_on_submit=True):
+            c1, c2 = st.columns(2)
+            with c1:
+                f_svc = st.selectbox("Service", _svc_list)
+                f_caller = st.text_input("Caller name / number",
+                                         placeholder="optional")
+            with c2:
+                f_dur = st.number_input("Duration (minutes)", min_value=0,
+                                        max_value=600, value=2, step=1)
+                f_out = st.selectbox("Outcome", _outcomes)
+            f_notes = st.text_area("Notes", placeholder="optional",
+                                   height=70)
+            if st.form_submit_button("💾 Save call", type="primary"):
+                st.session_state.call_log.append({
+                    "ts": datetime.now().strftime("%Y-%m-%d %H:%M"),
+                    "member": user["name"],
+                    "member_code": user.get("code", "ADMIN"),
+                    "service": f_svc,
+                    "caller": f_caller.strip(),
+                    "duration_min": int(f_dur),
+                    "outcome": f_out,
+                    "notes": f_notes.strip(),
+                })
+                log_activity(user["name"],
+                             f"logged a call ({f_svc}, {f_out})")
+                st.success("✅ Call logged")
+                st.rerun()
+
+    _log = st.session_state.call_log
+    if is_admin:
+        st.markdown("### 👥 Per-member totals")
+        _members = {}
+        for _m in st.session_state.team.values():
+            _members[_m["name"]] = {"location": _m.get("location", "—"),
+                                    "calls": 0, "booked": 0,
+                                    "minutes": 0}
+        for _e in _log:
+            _m = _members.setdefault(
+                _e["member"],
+                {"location": "—", "calls": 0, "booked": 0, "minutes": 0})
+            _m["calls"] += 1
+            _m["minutes"] += int(_e.get("duration_min", 0))
+            if _e.get("outcome", "").startswith("Booked"):
+                _m["booked"] += 1
+        _rows = [{"Member": _n, "Location": _v["location"],
+                  "Calls": _v["calls"], "Booked ✅": _v["booked"],
+                  "Minutes": _v["minutes"]}
+                 for _n, _v in sorted(_members.items())]
+        st.table(_rows)
+
+        st.markdown("### 📋 All calls")
+        _fmem = st.selectbox("Filter by member",
+                             ["All"] + sorted({e["member"] for e in _log}))
+        _shown = [e for e in _log
+                  if _fmem == "All" or e["member"] == _fmem]
+        if _shown:
+            st.table([{"Time": e["ts"], "Member": e["member"],
+                       "Service": e["service"],
+                       "Caller": e.get("caller", "") or "—",
+                       "Min": e.get("duration_min", 0),
+                       "Outcome": e.get("outcome", ""),
+                       "Notes": e.get("notes", "") or "—"}
+                      for e in reversed(_shown)])
+        else:
+            st.info("No calls logged yet.")
+    else:
+        _mine = [e for e in _log if e["member"] == user["name"]]
+        st.markdown(f"### My calls ({len(_mine)})")
+        _my_booked = sum(1 for e in _mine
+                         if e.get("outcome", "").startswith("Booked"))
+        c1, c2, c3 = st.columns(3)
+        c1.metric("Total calls", len(_mine))
+        c2.metric("Booked ✅", _my_booked)
+        c3.metric("Minutes",
+                  sum(int(e.get("duration_min", 0)) for e in _mine))
+        if _mine:
+            st.table([{"Time": e["ts"], "Service": e["service"],
+                       "Caller": e.get("caller", "") or "—",
+                       "Min": e.get("duration_min", 0),
+                       "Outcome": e.get("outcome", "")}
+                      for e in reversed(_mine)])
+
+    if _log:
+        _csv = ("time,member,service,caller,duration_min,outcome,notes\n" +
+                "\n".join(
+                    ",".join(f'"{str(e.get(k, ""))}"'
+                             for k in ("ts", "member", "service", "caller",
+                                       "duration_min", "outcome", "notes"))
+                    for e in _log))
+        st.download_button("⬇️ Export CSV", _csv,
+                           file_name="call-log.csv", mime="text/csv")
 
 
 # ----------------------------------------------------------------------------
