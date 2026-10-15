@@ -459,10 +459,11 @@ def _pexels_search(query: str, api_key: str, per_page: int = 12):
 
 
 def _stock_search(query: str, per_page: int = 12):
-    """Search all configured stock-video sources. Returns merged list.
+    """Search all configured stock-video sources. Returns (results, errors).
 
-    Each result has a 'source' field ('Pixabay'/'Pexels'). Raises RuntimeError
-    if no source is configured.
+    Each result has a 'source' field ('Pixabay'/'Pexels'). errors is a list
+    of 'Source: error' strings — shown to the user so a dead key or a
+    blocked API never fails silently.
     """
     have = []
     if PIXABAY_API_KEY:
@@ -471,23 +472,23 @@ def _stock_search(query: str, per_page: int = 12):
         have.append("pexels")
     if not have:
         raise RuntimeError("no stock API keys configured")
-    out = []
+    out, errs = [], []
     if "pixabay" in have:
         try:
             for r in _pixabay_search(query, PIXABAY_API_KEY,
                                      per_page=per_page):
                 r["source"] = "Pixabay"
                 out.append(r)
-        except Exception:
-            pass
+        except Exception as e:
+            errs.append(f"Pixabay: {e}")
     if "pexels" in have:
         try:
             for r in _pexels_search(query, PEXELS_API_KEY,
                                     per_page=per_page):
                 out.append(r)
-        except Exception:
-            pass
-    return out
+        except Exception as e:
+            errs.append(f"Pexels: {e}")
+    return out, errs
 
 
 def _stock_keys_configured():
@@ -2396,8 +2397,14 @@ elif page == "📝 Listing Generator":
         else:
             with st.spinner("Finding clips…"):
                 try:
-                    st.session_state["clip_results"] = _stock_search(
-                        clip_query, per_page=8)
+                    _res, _errs = _stock_search(clip_query, per_page=8)
+                    st.session_state["clip_results"] = _res
+                    for _e in _errs:
+                        st.error(f"Search failed ({_e}) — key check ya "
+                                 "dobara try karein.")
+                    if not _res and not _errs:
+                        st.info("Is keyword ke liye koi clip nahi mili — "
+                                "koi aur lafz try karein.")
                     log_activity(user["name"],
                                  f"searched listing clips: {clip_query}")
                 except Exception as e:
@@ -3201,8 +3208,13 @@ elif page == "🔗 Tools Hub":
             else:
                 with st.spinner("Searching stock videos…"):
                     try:
-                        st.session_state["px_results"] = _stock_search(
-                            px_query)
+                        _res2, _errs2 = _stock_search(px_query)
+                        st.session_state["px_results"] = _res2
+                        for _e in _errs2:
+                            st.error(f"Search failed ({_e})")
+                        if not _res2 and not _errs2:
+                            st.info("Koi video nahi mili — aur keyword try "
+                                    "karein.")
                     except Exception as e:
                         st.error(f"Search failed: {e}")
         for r in st.session_state.get("px_results", []):
