@@ -26,7 +26,7 @@ import tempfile
 import time
 import traceback
 import urllib.request
-from datetime import datetime
+from datetime import date, datetime, timedelta
 
 import streamlit as st
 import streamlit.components.v1 as components
@@ -446,32 +446,27 @@ def _pixabay_search(query: str, api_key: str, per_page: int = 12):
 # ----------------------------------------------------------------------------
 @st.cache_data(ttl=600)
 def _ringba_call_logs(account_id: str, token: str, days: int):
-    """Fetch call logs from Ringba API v2. Returns (rows, error)."""
-    url = f"https://api.ringba.com/v2/{account_id}/CallLogs/Date"
+    """Fetch call logs from Ringba API v2 (POST /{accountId}/calllogs).
+    Verified live 2026-10-15. Returns (rows, error)."""
+    today = date.today()
+    url = f"https://api.ringba.com/v2/{account_id}/calllogs"
     payload = json.dumps({
-        "dateRange": {"past": 0, "days": int(days)},
-        "callLog": {"page": 0, "pageSize": 1000,
-                    "sort": "dtStamp", "sortDirection": "desc"},
+        "ReportStart": str(today - timedelta(days=int(days))),
+        "ReportEnd": str(today + timedelta(days=1)),
     }).encode()
     req = urllib.request.Request(
         url, data=payload,
         headers={"Authorization": f"Token {token}",
                  "Content-Type": "application/json"})
     try:
-        with urllib.request.urlopen(req, timeout=30) as resp:
+        with urllib.request.urlopen(req, timeout=60) as resp:
             body = json.loads(resp.read().decode())
     except Exception as e:
         return [], f"API error: {e}"
-    items = (((body or {}).get("result") or {}).get("callLog")
-             or {}).get("data") or []
+    recs = ((body or {}).get("report") or {}).get("records") or []
     rows = []
-    for it in items:
-        cols = it.get("columns") or {}
-        tags = it.get("tags") or []
-        tag_str = "; ".join(
-            f"{t.get('name', '')}:{t.get('value', '')}"
-            for t in tags if isinstance(t, dict))
-        dt = cols.get("dtStamp")
+    for rc in recs:
+        dt = rc.get("callDt")
         try:
             ts = (datetime.fromtimestamp(int(dt) / 1000)
                   .strftime("%Y-%m-%d %H:%M") if dt else "—")
@@ -479,12 +474,13 @@ def _ringba_call_logs(account_id: str, token: str, days: int):
             ts = "—"
         rows.append({
             "time": ts,
-            "call_id": cols.get("inboundCallId", ""),
-            "dialed": str(cols.get("number", "")),
-            "caller": str(cols.get("inboundPhoneNumber", "")),
-            "seconds": int(cols.get("callLengthInSeconds") or 0),
-            "tags": tag_str,
+            "call_id": rc.get("inboundCallId", ""),
+            "dialed": str(rc.get("number", "")),
+            "caller": str(rc.get("inboundPhoneNumber", "")),
+            "seconds": int(rc.get("callLengthInSeconds") or 0),
+            "campaign": str(rc.get("campaignName", "")),
         })
+    rows.sort(key=lambda r: r["time"], reverse=True)
     return rows, ""
 
 
@@ -3022,13 +3018,13 @@ elif page == "📊 Ringba Calls":
                        "Duration": (f"{r['seconds'] // 60}m "
                                     f"{r['seconds'] % 60}s"
                                     if r["seconds"] else "0s"),
-                       "Tags": r["tags"] or "—"}
+                       "Campaign": r["campaign"] or "—"}
                       for r in _rows[:200]])
 
-            _csv = ("time,caller,dialed,seconds,tags\n" + "\n".join(
+            _csv = ("time,caller,dialed,seconds,campaign\n" + "\n".join(
                 ",".join(f'"{r.get(k, "")}"'
                          for k in ("time", "caller", "dialed",
-                                   "seconds", "tags"))
+                                   "seconds", "campaign"))
                 for r in _rows))
             st.download_button("⬇️ Export CSV", _csv,
                                file_name="ringba-calls.csv",
