@@ -1489,7 +1489,8 @@ if can_access("templates"):
 PAGES.append("📞 Call Log")
 if is_admin:
     PAGES.append("📊 Ringba Calls")
-PAGES += ["🛡️ Safety Toolkit", "🧠 Knowledge Base", "🔗 Tools Hub", "📋 Surveys"]
+PAGES += ["🛡️ Safety Toolkit", "🧠 Knowledge Base", "🔗 Tools Hub",
+         "🌐 Website", "📋 Surveys"]
 
 with st.sidebar:
     st.markdown('<p class="side-logo">🔧 EasyFix Agent</p>', unsafe_allow_html=True)
@@ -3460,6 +3461,35 @@ elif page == "🔗 Tools Hub":
                 st.caption(desc)
             with c2:
                 st.link_button("Open →", url)
+
+
+# ----------------------------------------------------------------------------
+# 🌐 Website — easytofix.homes attached to the agent
+# ----------------------------------------------------------------------------
+elif page == "🌐 Website":
+    st.subheader("🌐 easytofix.homes")
+    st.caption("Official EasyFix website — attached right here in the agent.")
+    st.link_button("🔗 Open website →", "https://www.easytofix.homes",
+                   use_container_width=True)
+    with st.container(border=True):
+        st.markdown("**📞 Direct lines**")
+        st.markdown("Main dispatch: **+18312931196** (24/7)")
+        st.caption("Every service has its own dedicated line — see the "
+                   "📞 Call Log / Service Numbers in the agent.")
+    with st.container(border=True):
+        st.markdown("**📄 Website sections**")
+        _wlinks = [
+            ("🏠 Home", "https://www.easytofix.homes/"),
+            ("📰 Blog", "https://www.easytofix.homes/blog"),
+        ]
+        for _t, _u in _wlinks:
+            st.link_button(f"{_t} →", _u, use_container_width=True)
+    with st.container(border=True):
+        st.markdown("**🤖 Website chatbot**")
+        st.success("✅ Live on the website — blue bubble, bottom-right "
+                   "corner (EasyFix Plumbing Assistant).")
+        st.caption("The same assistant also lives in this agent: open the "
+                   "🤖 Chatbot page.")
 
 
 # ----------------------------------------------------------------------------
