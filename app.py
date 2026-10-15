@@ -2338,8 +2338,9 @@ elif page == "🛡️ Safety Toolkit":
              "and understand proxies honestly.")
     log_activity(user["name"], "opened Safety Toolkit")
 
-    tab1, tab2, tab3 = st.tabs(
-        ["🌐 IP Detector", "👤 Chrome Profiles", "🔌 Proxy Guide"])
+    tab1, tab2, tab3, tab4 = st.tabs(
+        ["🌐 IP Detector", "👤 Chrome Profiles", "🔌 Proxy Guide",
+         "🔒 NordVPN Setup"])
 
     # ---------------- 1. IP Detector ----------------
     with tab1:
@@ -2467,6 +2468,62 @@ elif page == "🛡️ Safety Toolkit":
                 "proxies only, from a reputable provider. One proxy per "
                 "account. There is no safe free option — anyone promising "
                 "one is not telling the truth.")
+
+    # ---------------- 4. NordVPN Setup ----------------
+    with tab4:
+        st.markdown("### 🔒 NordVPN Setup")
+        st.success("✅ **Good news:** The owner has **NordVPN (paid)**. "
+                   "Install it on **your own device** and every team member "
+                   "gets a real **USA IP** — Facebook sees a USA location, "
+                   "not the office WiFi.")
+        st.markdown("#### Why this works")
+        st.markdown(
+            "NordVPN on **your laptop/phone** → your internet goes through a "
+            "**USA server** → Facebook sees a **USA IP address**. "
+            "30 members on 1 office WiFi = 1 IP = bans. "
+            "30 members each on NordVPN USA = 30 different IPs = **safe**."
+        )
+        with st.expander("💻 Laptop setup (step by step)", expanded=True):
+            st.markdown(
+                "1. Download NordVPN from **nordvpn.com** and install it\\n"
+                "2. **Log in** with the team NordVPN account (ask the admin)\\n"
+                "3. In the server list, search **United States**\\n"
+                "4. Pick a server in **Dallas** or **Chicago** (close = fast)\\n"
+                "5. Click **Connect** — wait for the green \"Connected\" status\\n"
+                "6. Open the **🌐 IP Detector** tab here and press "
+                "**Check My IP** — it must show **🇺🇸 USA**\\n"
+                "7. Only then open Facebook in your Chrome profile"
+            )
+        with st.expander("📱 Phone setup (step by step)", expanded=False):
+            st.markdown(
+                "1. Install **NordVPN** from the Play Store / App Store\\n"
+                "2. **Log in** with the team NordVPN account\\n"
+                "3. Connect to a **United States** server (Dallas/Chicago)\\n"
+                "4. Open your phone browser and do Facebook work there\\n"
+                "5. Keep the VPN connected the **whole time** you work"
+            )
+        st.markdown("#### 📏 Team rules — follow these every day")
+        st.markdown(
+            "- ✅ **VPN ON before opening Facebook** — always, no exceptions\\n"
+            "- ✅ **Same USA city per account** — don't switch cities daily, "
+            "it looks suspicious\\n"
+            "- ✅ One NordVPN login works on **10 devices at the same time**\\n"
+            "- ❌ **Never** do Facebook work with the VPN disconnected\\n"
+            "- ❌ Don't share your Chrome profile with another member"
+        )
+        st.warning("⚠️ **Device limit math:** 30 members ÷ 10 devices per "
+                   "NordVPN login = the team may need **3 NordVPN logins**. "
+                   "Check the plan's device limit with the admin — if logins "
+                   "run out, split members into groups of 10.")
+        with st.expander("✅ VPN Check — do this BEFORE starting work",
+                         expanded=False):
+            st.markdown(
+                "**Every member, every day, before touching Facebook:**\\n\\n"
+                "1. ☐ NordVPN **connected** to a USA server?\\n"
+                "2. ☐ **IP Detector** tab shows **🇺🇸 USA**?\\n"
+                "3. ☐ Correct **Chrome profile** for your account?\\n\\n"
+                "All three green → **start work**. Any red → **fix it first**."
+            )
 
 
 # ----------------------------------------------------------------------------
