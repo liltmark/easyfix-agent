@@ -741,7 +741,22 @@ def _init_state():
     if "user" not in st.session_state:
         st.session_state.user = None
     if "team" not in st.session_state:
-        st.session_state.team = {}  # code -> {name, roles}
+        # Pre-configured team (owner: Muhammad Mudassir Yaseen)
+        # Codes are private — share each code only with that member.
+        st.session_state.team = {
+            "76SPNT": {"name": "Fahad", "roles": ["all"],
+                       "location": "Dallas, TX"},
+            "LA69EC": {"name": "Daniyal", "roles": ["all"],
+                       "location": "Chicago, IL"},
+            "GJ3YX7": {"name": "Ahad", "roles": ["all"],
+                       "location": "New York, NY"},
+            "92JNDN": {"name": "Imran", "roles": ["all"],
+                       "location": "Houston, TX"},
+            "E9ZUTV": {"name": "Zainu", "roles": ["all"],
+                       "location": "Miami, FL"},
+            "GWJVY7": {"name": "Kashi", "roles": ["all"],
+                       "location": "Atlanta, GA"},
+        }
     if "admin_password" not in st.session_state:
         st.session_state.admin_password = DEFAULT_ADMIN_PASSWORD
     if "activity" not in st.session_state:
