@@ -757,6 +757,21 @@ def autofix_spam(title: str, desc: str) -> tuple:
     return _fix(title), _fix(desc)
 
 
+def _listing_preview(title: str, desc: str):
+    """Render a big, bold, easy-to-read preview card for a listing.
+
+    The copy boxes stay below for copying; this is for reading.
+    """
+    import html as _html
+    t = _html.escape(str(title or ""))
+    d = _html.escape(str(desc or ""))
+    st.markdown(
+        f'<div class="listing-preview"><div class="lp-title">{t}</div>'
+        f'<div class="lp-desc">{d}</div></div>',
+        unsafe_allow_html=True,
+    )
+
+
 def show_spam_score(title: str, desc: str, key_prefix: str):
     """Render the spam-score widget with an auto-fix button.
 
@@ -1340,6 +1355,23 @@ st.markdown(
     #MainMenu { visibility: hidden; }
     header { visibility: hidden; }
     .stDeployButton { display: none; }
+    /* Big bold listing preview — easy to read for the team */
+    .listing-preview {
+        background: linear-gradient(135deg, rgba(30,27,75,0.92), rgba(49,26,95,0.92));
+        border: 2px solid rgba(139,92,246,0.65);
+        border-radius: 14px;
+        padding: 1.1rem 1.3rem;
+        margin: 0.6rem 0 1rem 0;
+        box-shadow: 0 4px 22px rgba(139,92,246,0.35);
+    }
+    .listing-preview .lp-title {
+        font-size: 1.45rem; font-weight: 800; color: #ffffff !important;
+        margin-bottom: 0.55rem; line-height: 1.3;
+    }
+    .listing-preview .lp-desc {
+        font-size: 1.12rem; font-weight: 600; color: #f4f4f5 !important;
+        line-height: 1.65; white-space: pre-wrap;
+    }
     </style>
     """,
     unsafe_allow_html=True,
@@ -1957,6 +1989,7 @@ elif page == "📝 Listing Generator":
         _gen_title = st.session_state.lst_gen_title
         _gen_desc = st.session_state.lst_gen_desc
         st.markdown("### 📋 Your listing")
+        _listing_preview(_gen_title, _gen_desc)
         st.text_input("Title (copy)", value=_gen_title, key="lst_title")
         st.text_area("Description (copy)", value=_gen_desc, height=260,
                      key="lst_desc")
@@ -2142,6 +2175,7 @@ elif page == "📝 Listing Generator":
             for i, v in enumerate(vars_):
                 with st.expander(f"📌 Variation {i+1}: {v['title'][:55]}",
                                  expanded=(i == 0)):
+                    _listing_preview(v["title"], v["desc"])
                     st.text_input("Title (copy)", value=v["title"],
                                   key=f"v{g}_title_{i}")
                     st.text_area("Description (copy)", value=v["desc"],
