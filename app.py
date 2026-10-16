@@ -1537,16 +1537,16 @@ def show_ad_slot(height: int = 280):
 
 
 def maybe_survey_gate():
-    """Every 3rd video → show a survey before download unlocks."""
-    st.session_state.videos_made += 1
-    if st.session_state.videos_made % 3 == 0:
+    """Every 3rd video → show a survey; checkbox unlocks the download."""
+    if st.session_state.get("videos_made", 0) % 3 == 0 and st.session_state.get("videos_made", 0) > 0:
         s = random.choice(SURVEY_LINKS)
-        st.info("📋 **Quick survey unlocks your download** — "
-                "it supports this free tool!")
+        st.info("📋 **Quick survey supports this free tool!** 🙏")
         st.markdown(f"**{s['title']}**")
         st.caption(s["desc"])
-        st.link_button("▶ Complete Survey to Unlock", s["url"])
-        return False
+        st.link_button("▶ Open Survey", s["url"])
+        unlocked = st.checkbox("✅ I completed the survey — unlock my download",
+                               key=f"survey_done_{st.session_state.videos_made}")
+        return unlocked
     return True
 
 
@@ -1811,6 +1811,7 @@ elif page == "🎬 Video Studio":
                         video_bytes = mux_voiceover(video_bytes, audio)
                     st.session_state.last_video = video_bytes
                     st.session_state.last_label = label
+                    st.session_state.videos_made = st.session_state.get("videos_made", 0) + 1
                 except Exception as e:
                     st.error(f"❌ {e}")
                     st.stop()
