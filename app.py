@@ -75,6 +75,35 @@ SURVEY_LINKS = [
 #   ADMIN_PASSWORD = "your-secret-password"
 # then reboot the app. The in-app "Change admin password" tab only
 # changes it for the current browser session.
+# Team access codes — NEVER hardcode them here (this repo is public).
+# Set them in the Streamlit dashboard: App settings → Secrets →
+#   TEAM_CODES='{"CODE1": {"name": "Fahad", "roles": ["all"], "location": "Dallas, TX"}, ...}'
+# then reboot the app. Old codes die on deploy.
+def _load_team_codes():
+    import json as _json
+    try:
+        raw = st.secrets.get("TEAM_CODES", "")
+    except Exception:
+        raw = ""
+    raw = (raw or "").strip()
+    if not raw:
+        return {}
+    try:
+        data = _json.loads(raw)
+    except Exception:
+        return {}
+    # Validate shape: {code: {name, roles, location}}
+    team = {}
+    if isinstance(data, dict):
+        for code, m in data.items():
+            if isinstance(m, dict) and m.get("name"):
+                team[str(code).strip()] = {
+                    "name": m["name"],
+                    "roles": m.get("roles", ["all"]),
+                    "location": m.get("location", ""),
+                }
+    return team
+
 def _load_admin_password():
     try:
         pw = st.secrets.get("ADMIN_PASSWORD", "")
@@ -929,22 +958,10 @@ def _init_state():
     if "user" not in st.session_state:
         st.session_state.user = None
     if "team" not in st.session_state:
-        # Pre-configured team (owner: Muhammad Mudassir Yaseen)
-        # Codes are private — share each code only with that member.
-        st.session_state.team = {
-            "76SPNT": {"name": "Fahad", "roles": ["all"],
-                       "location": "Dallas, TX"},
-            "LA69EC": {"name": "Daniyal", "roles": ["all"],
-                       "location": "Chicago, IL"},
-            "GJ3YX7": {"name": "Ahad", "roles": ["all"],
-                       "location": "New York, NY"},
-            "92JNDN": {"name": "Imran", "roles": ["all"],
-                       "location": "Houston, TX"},
-            "E9ZUTV": {"name": "Zainu", "roles": ["all"],
-                       "location": "Miami, FL"},
-            "GWJVY7": {"name": "Kashi", "roles": ["all"],
-                       "location": "Atlanta, GA"},
-        }
+        # Team roster loads from the TEAM_CODES secret (Streamlit dashboard →
+        # App settings → Secrets). Nothing hardcoded — public repo stays clean.
+        # If the secret is missing, team login is disabled until it is set.
+        st.session_state.team = _load_team_codes()
     if "admin_password" not in st.session_state:
         st.session_state.admin_password = DEFAULT_ADMIN_PASSWORD
     if "activity" not in st.session_state:
