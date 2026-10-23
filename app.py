@@ -901,18 +901,18 @@ ROLES = {
 # 📞 Service numbers (admin-managed) + 📋 Message templates (admin-managed)
 # ----------------------------------------------------------------------------
 DEFAULT_SERVICE_NUMBERS = {
-    # Verified from Ringba dashboard (Lead Smart Inc) 2026-10-15 — all 9
+    # Ringba (Lead Smart Inc) verified 2026-10-15; updated 2026-10-23 to match easytofix.homes: Plumbing + Roofing now MarketCall tracking numbers, Emergency now +13862966181 (owner's orders 2026-10-23). Remaining lines Ringba — all 9
     # live tracking numbers with their campaigns. 6 of 6 match the numbers
     # on https://www.easytofix.homes; 3 more (Garage Door, Dumpster,
     # Carpet/Flooring) confirmed from Ringba only.
     "Default": "+18312931196",
-    "Plumbing": "+18312931196",
+    "Plumbing": "+18445781727",
     "Residential Electrical Services": "+18666874517",
-    "Residential Roofing Services": "+18664923583",
+    "Residential Roofing Services": "+18442110179",
     "Home Appliance Repair": "+13238311502",
     "Home HVAC Services": "+18589550579",
     "Home Painting Services": "+13214780719",
-    "24/7 Home Emergency Dispatch": "+18312931196",
+    "24/7 Home Emergency Dispatch": "+13862966181",
     "Garage Door Services": "+13239162354",
     "Dumpster & Porta Potty Rental": "+16196799844",
     "Carpet & Flooring Installation": "+13803330948",
