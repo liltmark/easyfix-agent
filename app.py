@@ -1774,7 +1774,8 @@ if page == "👑 Admin Panel":
 # ----------------------------------------------------------------------------
 elif page == "🎬 Video Studio":
     st.subheader("🎬 Video Studio")
-    st.caption("AI video generation — 100% free. Merged from your video tool.")
+    st.caption("EasyFix AI video maker — 100% free. Video, voiceover & "
+               "lip-sync, all inside EasyFix Agent.")
 
     mode = st.radio("Mode", ["🎬 Text to Video", "🖼️ Image to Video"],
                     horizontal=True)
@@ -3542,11 +3543,13 @@ elif page == "🔗 Tools Hub":
     st.divider()
     st.markdown("### 🧰 General tools")
     TOOLS = [
-        ("🎬 Imposter Video Studio",
-         "AI text-to-video & image-to-video generator — 100% free, no API keys.",
+        ("🎬 EasyFix Video Studio",
+         "EasyFix AI video maker — text-to-video & image-to-video, voiceover "
+         "& lip-sync, 100% free. By EasyFix — easytofix.homes",
          "https://free-ai-video-studio-c4mdwne7wccbeoeagz9zaz.streamlit.app/"),
-        ("🤖 Personal Agent",
-         "Mudasir's personal AI assistant — chat, scripts, business advice.",
+        ("🤖 EasyFix Personal Assistant",
+         "Mudasir's personal AI assistant — chat, scripts, business advice. "
+         "By EasyFix — easytofix.homes",
          "https://my-personal-agent-cvvehdim7bte3vgcdjmjnn.streamlit.app/"),
         ("🌐 easytofix.homes",
          "Official EasyFix website — plumbing & home services.",
