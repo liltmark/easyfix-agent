@@ -1527,7 +1527,20 @@ with st.sidebar:
     st.caption(f"👤 {user['name']}")
     if is_admin:
         st.success("👑 Admin mode")
-    page = st.radio("Navigation", PAGES, label_visibility="collapsed")
+    # Simple menu (user's order 2026-10-25): daily-work options up front,
+    # everything else tucked under "More options". Page names are unchanged,
+    # so every page handler below keeps working exactly as before.
+    DAILY = ["👑 Admin Panel", "📝 Listing Generator", "💬 Reply Assistant",
+             "🎬 Video Studio", "🎬 Video Library", "📋 Message Templates"]
+    daily_pages = [p for p in PAGES if p in DAILY]
+    more_pages = [p for p in PAGES if p not in DAILY]
+    nav = st.radio("Menu", daily_pages + ["➕ More options"],
+                   label_visibility="collapsed", key="nav_main")
+    if nav == "➕ More options":
+        page = st.radio("More options", more_pages,
+                        label_visibility="collapsed", key="nav_more")
+    else:
+        page = nav
     st.divider()
     if st.button("🚪 Sign out"):
         log_activity(user["name"], "signed out")
