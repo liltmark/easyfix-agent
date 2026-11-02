@@ -1506,7 +1506,7 @@ if can_access("videos"):
     PAGES += ["🎬 Video Studio", "🎙️ Voiceover Studio"]
 if can_access("listings"):
     PAGES.append("📝 Listing Generator")
-    PAGES.append("🎬 Video Library")
+    PAGES.append("📚 Video Library")
 if can_access("replies"):
     PAGES.append("💬 Reply Assistant")
 PAGES.append("🤖 Chatbot")
@@ -1520,23 +1520,37 @@ PAGES.append("📞 Call Log")
 if is_admin:
     PAGES.append("📊 Ringba Calls")
 PAGES += ["🛡️ Safety Toolkit", "🧠 Knowledge Base", "🔗 Tools Hub",
-         "🌐 Website", "📋 Surveys"]
+         "🌐 Website", "💰 Earn — Surveys"]
 
 with st.sidebar:
     st.markdown('<p class="side-logo">🔧 EasyFix Agent</p>', unsafe_allow_html=True)
     st.caption(f"👤 {user['name']}")
     if is_admin:
         st.success("👑 Admin mode")
-    # Simple menu (user's order 2026-10-25): daily-work options up front,
-    # everything else tucked under "More options". Page names are unchanged,
-    # so every page handler below keeps working exactly as before.
+    # Grouped menu (structure rework 2026-11-02, owner's order): the menu
+    # is split into clear sections — "Roz ka Kaam" (daily pages) up front,
+    # everything else under "More options" in a fixed order (management
+    # first, rarely used tools/reference last). Two page labels were
+    # renamed for clarity, with their handlers renamed to match:
+    # "📋 Surveys" -> "💰 Earn — Surveys" (the CPAGrip earning links are
+    # now a clear daily-menu section, not buried at the end of More) and
+    # "🎬 Video Library" -> "📚 Video Library" (🎬 was used by two pages).
+    # All other page names/handlers are unchanged.
     DAILY = ["👑 Admin Panel", "📝 Listing Generator", "💬 Reply Assistant",
-             "🎬 Video Studio", "🎬 Video Library", "📋 Message Templates"]
-    daily_pages = [p for p in PAGES if p in DAILY]
-    more_pages = [p for p in PAGES if p not in DAILY]
+             "🤖 Chatbot", "📞 Call Log", "💰 Earn — Surveys",
+             "🎬 Video Studio", "📚 Video Library", "📋 Message Templates"]
+    MORE_ORDER = ["🔑 Account Vault", "🔄 Smart Account Manager",
+                  "📊 Ringba Calls", "🎙️ Voiceover Studio", "🌐 Website",
+                  "🧠 Knowledge Base", "🔗 Tools Hub", "🛡️ Safety Toolkit"]
+    daily_pages = [p for p in DAILY if p in PAGES]
+    more_pages = [p for p in MORE_ORDER if p in PAGES]
+    more_pages += [p for p in PAGES
+                   if p not in daily_pages and p not in more_pages]
+    st.markdown("#### 🏠 Roz ka Kaam")
     nav = st.radio("Menu", daily_pages + ["➕ More options"],
                    label_visibility="collapsed", key="nav_main")
     if nav == "➕ More options":
+        st.markdown("#### 🗂️ Management & Tools")
         page = st.radio("More options", more_pages,
                         label_visibility="collapsed", key="nav_more")
     else:
@@ -1965,10 +1979,10 @@ elif page == "🎙️ Voiceover Studio":
 # 📝 FB Listing Generator
 # ----------------------------------------------------------------------------
 # ----------------------------------------------------------------------------
-# 🎬 Video Library — 2000+ bundled stock videos, browsable by the team.
+# 📚 Video Library — 2000+ bundled stock videos, browsable by the team.
 # ----------------------------------------------------------------------------
-elif page == "🎬 Video Library":
-    st.subheader("🎬 Video Library")
+elif page == "📚 Video Library":
+    st.subheader("📚 Video Library")
     st.caption("2000+ ready stock videos for listings — pick by category, "
                "preview, then copy the link. No searching needed.")
 
@@ -3598,11 +3612,14 @@ elif page == "🌐 Website":
 
 
 # ----------------------------------------------------------------------------
-# 📋 Surveys
+# 💰 Earn — Surveys (CPAGrip offer links — the app's earning section)
 # ----------------------------------------------------------------------------
-elif page == "📋 Surveys":
-    st.subheader("📋 Surveys")
+elif page == "💰 Earn — Surveys":
+    st.subheader("💰 Earn — Surveys & Offers")
     st.write("Complete surveys — they keep EasyFix Agent free for everyone.")
+    st.info("💰 **Yehi links is app ki earning hain** — jab log in surveys "
+            "ko complete karte hain, to isi earning se EasyFix Agent sab "
+            "ke liye 100% free rehta hai.")
     for s in SURVEY_LINKS:
         with st.container(border=True):
             st.markdown(f"**{s['title']}**")
